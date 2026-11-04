@@ -1,0 +1,14 @@
+[book]
+authors = ["Eugene Yokota"]
+language = "en"
+multilingual = false
+src = "doc"
+title = "Scruff"
+
+[output.html]
+theme = "theme"
+default-theme = "light"
+additional-css = [
+  "doc/custom-202602.css",
+  "doc/mdbook-admonish.css"
+]
