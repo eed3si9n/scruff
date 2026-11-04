@@ -19,7 +19,9 @@ object ScruffPlugin extends AutoPlugin {
     val scruffFmtOnCompile = settingKey[Boolean](
       "Whether compiling formats the configuration's sources with scruff first"
     )
-    val scruffVersion = settingKey[String]("The scruff release scruffBinary downloads")
+    val scruffVersion = settingKey[String](
+      "The scruff release scruffBinary downloads; by default the version in .scruff.toml"
+    )
     @transient
     val scruffBinary = taskKey[File](
       "The scruff executable to run; scruffVersion's release by default"
@@ -34,12 +36,31 @@ object ScruffPlugin extends AutoPlugin {
 
   import autoImport.*
 
+  /** The scruff version when .scruff.toml doesn't name one. */
+  val DefaultVersion = "0.1.0"
+
+  private val VersionLine = """\s*version\s*=\s*["']([^"']*)["'].*""".r
+
+  /** The top-level `version` in `config`, a .scruff.toml, if it has one.
+    * Lines after the first `[table]` belong to that table, so they're not
+    * looked at.
+    */
+  def configVersion(config: File): Option[String] =
+    if (!config.isFile) None
+    else
+      IO
+        .readLines(config)
+        .iterator
+        .takeWhile(!_.trim.startsWith("["))
+        .collectFirst { case VersionLine(v) if v.nonEmpty => v }
+
   override def globalSettings: Seq[Def.Setting[?]] = Seq(
-    scruffFmtOnCompile := false,
-    scruffVersion := "0.1.0",
+    scruffFmtOnCompile := false
   )
 
   override def buildSettings: Seq[Def.Setting[?]] = Seq(
+    scruffVersion := configVersion((ThisBuild / baseDirectory).value / ".scruff.toml")
+      .getOrElse(DefaultVersion),
     scruffBinary := ScruffDownload.binary(scruffVersion.value, streams.value.log),
     scruffFmt := format(scruffBinary.value, (ThisBuild / baseDirectory).value, streams.value.log),
     scruffFmtCheck := check(

@@ -1,0 +1,162 @@
+name: "Scruff"
+description: "Installs the scruff Scala formatter and checks formatting"
+branding:
+  icon: "check-square"
+  color: "red"
+inputs:
+  version:
+    description: >-
+      The scruff version to install, from GitHub Releases. `auto` reads `version` from
+      `.scruff.toml` at the workspace root, and falls back to 0.1.0
+    required: true
+    default: auto
+  args:
+    description: "Arguments passed to scruff; empty to only install it and add it to PATH"
+    required: false
+    default: format --check
+runs:
+  using: "composite"
+  steps:
+    - name: Set up cache paths
+      id: cache-paths
+      shell: bash
+      env:
+        SCRUFF_VERSION: ${{ inputs.version }}
+        SCRUFF_CACHE_KEY_VERSION: 1
+        # Used when `auto` finds no version in .scruff.toml.
+        SCRUFF_DEFAULT_VERSION: 0.1.0
+      run: |
+        if [[ "$SCRUFF_VERSION" == "auto" ]]; then
+          config="$GITHUB_WORKSPACE/.scruff.toml"
+          SCRUFF_VERSION=""
+          if [[ -f "$config" ]]; then
+            # The top-level `version = "x.y.z"` key, before any [table].
+            SCRUFF_VERSION=$(awk -v q="[\"']" '
+              /^[ \t]*\[/ { exit }
+              /^[ \t]*version[ \t]*=/ {
+                v = $0; sub("^[^=]*=[ \t]*" q, "", v); sub(q ".*$", "", v)
+                print v; exit
+              }' "$config" | tr -d '\r')
+          fi
+          if [[ -z "$SCRUFF_VERSION" ]]; then
+            SCRUFF_VERSION=$SCRUFF_DEFAULT_VERSION
+            echo "::notice::No version in .scruff.toml; using scruff $SCRUFF_VERSION"
+          fi
+        fi
+        if [[ ! "$SCRUFF_VERSION" =~ ^[0-9A-Za-z.+-]+$ ]]; then
+          echo "::error::Invalid scruff version '$SCRUFF_VERSION'"
+          exit 1
+        fi
+        echo "scruff_version=$SCRUFF_VERSION" >> "$GITHUB_OUTPUT"
+
+        # Release asset names follow the CI build matrix.
+        case "$RUNNER_OS-$RUNNER_ARCH" in
+          Linux-X64)     platform=x86_64-pc-linux;       ext=tar.gz; exe=scruff ;;
+          Linux-ARM64)   platform=aarch64-pc-linux;      ext=tar.gz; exe=scruff ;;
+          macOS-*)       platform=universal-apple-darwin; ext=tar.gz; exe=scruff ;;
+          # Windows on ARM runs the x86_64 binary under emulation.
+          Windows-*)     platform=x86_64-pc-win32;       ext=zip;    exe=scruff.exe ;;
+          *)
+            echo "::error::scruff has no binary for $RUNNER_OS $RUNNER_ARCH"
+            exit 1 ;;
+        esac
+        name="scruff-$platform-$SCRUFF_VERSION"
+        if [[ "$RUNNER_OS" == "Windows" ]]; then
+          echo "scruff_toolpath=$RUNNER_TOOL_CACHE\\scruff\\$SCRUFF_VERSION" >> "$GITHUB_OUTPUT"
+          echo "scruff_downloadpath=$RUNNER_TEMP\\_scruff" >> "$GITHUB_OUTPUT"
+        else
+          echo "scruff_toolpath=$RUNNER_TOOL_CACHE/scruff/$SCRUFF_VERSION" >> "$GITHUB_OUTPUT"
+          echo "scruff_downloadpath=$RUNNER_TEMP/_scruff" >> "$GITHUB_OUTPUT"
+        fi
+        echo "scruff_name=$name" >> "$GITHUB_OUTPUT"
+        echo "scruff_asset=$name.$ext" >> "$GITHUB_OUTPUT"
+        echo "scruff_exe=$name/$exe" >> "$GITHUB_OUTPUT"
+        echo "scruff_cachekey=$RUNNER_OS-$RUNNER_ARCH-scruff-$SCRUFF_VERSION-$SCRUFF_CACHE_KEY_VERSION" >> "$GITHUB_OUTPUT"
+    - name: Check tool cache
+      id: cache-tool-dir
+      shell: bash
+      env:
+        SCRUFF_TOOLPATH: "${{ steps.cache-paths.outputs.scruff_toolpath }}"
+        SCRUFF_EXE: "${{ steps.cache-paths.outputs.scruff_exe }}"
+      run: |
+        if [[ -f "$SCRUFF_TOOLPATH/$SCRUFF_EXE" ]]; then
+          echo "cache-hit=true" >> "$GITHUB_OUTPUT"
+        else
+          mkdir -p "$SCRUFF_TOOLPATH"
+          echo "cache-hit=false" >> "$GITHUB_OUTPUT"
+        fi
+    - name: Cache scruff binary
+      if: steps.cache-tool-dir.outputs.cache-hit != 'true'
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ${{ steps.cache-paths.outputs.scruff_toolpath }}
+        key: ${{ steps.cache-paths.outputs.scruff_cachekey }}
+    - name: Check runner cache
+      id: cache-tool-dir2
+      shell: bash
+      env:
+        SCRUFF_TOOLPATH: "${{ steps.cache-paths.outputs.scruff_toolpath }}"
+        SCRUFF_EXE: "${{ steps.cache-paths.outputs.scruff_exe }}"
+      run: |
+        # actions/cache can report a hit on Windows without restoring, so look again.
+        if [[ -f "$SCRUFF_TOOLPATH/$SCRUFF_EXE" ]]; then
+          echo "cache-hit=true" >> "$GITHUB_OUTPUT"
+        else
+          echo "cache-hit=false" >> "$GITHUB_OUTPUT"
+        fi
+    - name: Download and install scruff
+      if: steps.cache-tool-dir2.outputs.cache-hit != 'true'
+      shell: bash
+      env:
+        SCRUFF_VERSION: ${{ steps.cache-paths.outputs.scruff_version }}
+        SCRUFF_TOOLPATH: "${{ steps.cache-paths.outputs.scruff_toolpath }}"
+        SCRUFF_DOWNLOADPATH: "${{ steps.cache-paths.outputs.scruff_downloadpath }}"
+        SCRUFF_ASSET: "${{ steps.cache-paths.outputs.scruff_asset }}"
+        SCRUFF_EXE: "${{ steps.cache-paths.outputs.scruff_exe }}"
+      run: |
+        base="https://github.com/eed3si9n/scruff/releases/download/v$SCRUFF_VERSION"
+        mkdir -p "$SCRUFF_DOWNLOADPATH"
+        cd "$SCRUFF_DOWNLOADPATH"
+        curl -fsSL --retry 3 -o "$SCRUFF_ASSET" "$base/$SCRUFF_ASSET"
+        curl -fsSL --retry 3 -o SHA256SUMS "$base/SHA256SUMS"
+
+        # Check the archive against the release's SHA256SUMS.
+        expected=$(awk -v f="$SCRUFF_ASSET" '$2 == f { print $1 }' SHA256SUMS)
+        if command -v sha256sum > /dev/null; then
+          actual=$(sha256sum "$SCRUFF_ASSET" | awk '{ print $1 }')
+        else
+          actual=$(shasum -a 256 "$SCRUFF_ASSET" | awk '{ print $1 }')
+        fi
+        if [[ -z "$expected" || "$expected" != "$actual" ]]; then
+          echo "::error::checksum mismatch for $SCRUFF_ASSET (expected '$expected', got '$actual')"
+          exit 1
+        fi
+
+        if [[ "$SCRUFF_ASSET" == *.zip ]]; then
+          unzip -o -q "$SCRUFF_ASSET" -d "$SCRUFF_TOOLPATH"
+        else
+          tar xzf "$SCRUFF_ASSET" -C "$SCRUFF_TOOLPATH"
+        fi
+        if [[ ! -f "$SCRUFF_TOOLPATH/$SCRUFF_EXE" ]]; then
+          echo "::error::$SCRUFF_EXE not found in $SCRUFF_ASSET"
+          exit 1
+        fi
+    - name: Setup PATH
+      shell: bash
+      env:
+        SCRUFF_TOOLPATH: "${{ steps.cache-paths.outputs.scruff_toolpath }}"
+        SCRUFF_NAME: "${{ steps.cache-paths.outputs.scruff_name }}"
+      run: |
+        cd "$SCRUFF_TOOLPATH/$SCRUFF_NAME"
+        if [[ "$RUNNER_OS" == "Windows" ]]; then
+          echo "$(cygpath -w "$PWD")" >> "$GITHUB_PATH"
+        else
+          echo "$PWD" >> "$GITHUB_PATH"
+        fi
+    - name: Run scruff
+      if: inputs.args != ''
+      shell: bash
+      env:
+        SCRUFF_ARGS: ${{ inputs.args }}
+      # Unquoted on purpose: the args string is split into words.
+      run: scruff $SCRUFF_ARGS

@@ -1,0 +1,7 @@
+# The build is Scala 3 (sbt 2); plugin/.scruff.toml covers the plugin.
+dialect = "scala3"
+
+exclude-paths = [
+  # Test inputs for scruff itself.
+  "glob:**/corpora/**",
+]

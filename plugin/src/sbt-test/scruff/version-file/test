@@ -1,0 +1,17 @@
+# Without .scruff.toml, the default version.
+> checkVersion 0.1.0
+
+# The top-level version in .scruff.toml, not the one under a table.
+$ copy-file scruff-toml.txt .scruff.toml
+> reload
+> checkVersion 0.9.0
+
+# A version set in the build wins.
+> set ThisBuild / scruffVersion := "0.5.0"
+> checkVersion 0.5.0
+
+# scruff itself accepts the version key.
+$ copy-file scruff-version.txt .scruff.toml
+> set ThisBuild / scruffBinary := file(sys.props("scruff.binary"))
+> scruffFmt
+> scruffFmtCheck

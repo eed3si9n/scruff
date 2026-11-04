@@ -1,0 +1,5 @@
+dialect = "scala3"
+  version = '0.9.0' # pinned
+
+[other]
+version = "1.0.0"

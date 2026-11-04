@@ -287,6 +287,11 @@ impl Config {
                         .filter(|&n| n > 0)
                         .ok_or("max-column must be a positive number")?;
                 }
+                // Read by tools that install scruff (the GitHub action); the
+                // formatter only checks that it is a string.
+                "version" => {
+                    value.as_str().ok_or("version must be a string, such as \"0.1.0\"")?;
+                }
                 "include-paths" => patterns.include_paths = Some(strings()?),
                 "exclude-paths" => patterns.exclude_paths = strings()?,
                 "dialect" => {
@@ -299,8 +304,8 @@ impl Config {
                 }
                 _ => {
                     return Err(format!(
-                        "unknown key {key:?}; the keys are max-column, dialect, include-paths \
-                         and exclude-paths"
+                        "unknown key {key:?}; the keys are version, max-column, dialect, \
+                         include-paths and exclude-paths"
                     ));
                 }
             }
@@ -782,6 +787,7 @@ mod tests {
 
     #[test]
     fn scruff_toml_defaults() {
+        assert!(scruff_config("version = \"0.1.0\"").is_ok());
         let c = scruff_config("").unwrap();
         assert_eq!(c.max_column, 100);
         assert!(c.includes(Path::new("/p/build.sbt")));
@@ -793,6 +799,7 @@ mod tests {
         let message = |text| scruff_config(text).unwrap_err().message;
         assert!(message("maxColumn = 120").contains("unknown key \"maxColumn\""));
         assert!(message("max-column = \"wide\"").contains("positive number"));
+        assert!(message("version = 1").contains("must be a string"));
         assert!(message("exclude-paths = \"glob:**\"").contains("list of strings"));
         assert!(message("exclude-paths = [\"**/gen/**\"]").contains("prefix"));
         assert!(!message("max-column = ").is_empty());
