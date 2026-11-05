@@ -11,13 +11,14 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  # Decides whether the Rust tests and builds need to run, so that changes
-  # only to docs or Scala skip them.
+  # Decides whether the Rust tests and builds, and the sbt plugin's tests,
+  # need to run, so that changes only to docs skip them.
   changes:
     name: Changed files
     runs-on: ubuntu-latest
     outputs:
       rust: ${{ steps.changes.outputs.rust }}
+      plugin: ${{ steps.changes.outputs.plugin }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -38,6 +39,7 @@ jobs:
             base=$PUSH_BEFORE
           fi
           rust=true
+          plugin=true
           if [[ -n "$base" && ! "$base" =~ ^0+$ ]] &&
              files=$(git diff --name-only "$base" HEAD); then
             echo "Changed files:"
@@ -46,9 +48,16 @@ jobs:
             if ! grep -qE '^(src/|tests/|examples/|Cargo\.(toml|lock)$|\.github/workflows/ci\.yml$)' <<< "$files"; then
               rust=false
             fi
+            # The plugin's tests run the scruff they build, so they also
+            # run when the Rust code changes.
+            if [[ "$rust" == false ]] &&
+               ! grep -qE '^(plugin/|build\.sbt$|project/[^/]+\.(sbt|properties)$)' <<< "$files"; then
+              plugin=false
+            fi
           fi
-          echo "rust=$rust"
+          echo "rust=$rust plugin=$plugin"
           echo "rust=$rust" >> "$GITHUB_OUTPUT"
+          echo "plugin=$plugin" >> "$GITHUB_OUTPUT"
 
   test:
     name: Test (${{ matrix.os }})
@@ -73,6 +82,30 @@ jobs:
         uses: Swatinem/rust-cache@v2
       - if: needs.changes.outputs.rust == 'true'
         run: cargo test --locked
+
+  # The sbt plugin's scripted tests, for sbt 2 and sbt 1, against the scruff
+  # built here.
+  plugin:
+    name: Test sbt plugin
+    needs: changes
+    if: needs.changes.outputs.plugin == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # The plugin's version, and the scruff it downloads by default,
+          # come from the release tags.
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build --release --locked
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: 17
+          cache: sbt
+      - uses: sbt/setup-sbt@v1
+      - run: sbt -v scripted
 
   build:
     name: Build (${{ matrix.target }})
