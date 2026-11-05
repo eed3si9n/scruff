@@ -37,7 +37,7 @@ object ScruffPlugin extends AutoPlugin {
   import autoImport.*
 
   /** The scruff version when .scruff.toml doesn't name one. */
-  val DefaultVersion = "0.1.0"
+  val DefaultVersion = "0.2.0"
 
   private val VersionLine = """\s*version\s*=\s*["']([^"']*)["'].*""".r
 

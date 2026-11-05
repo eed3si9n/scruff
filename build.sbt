@@ -1,4 +1,4 @@
-version := "0.1.1-SNAPSHOT"
+version := "0.2.1-SNAPSHOT"
 scalaVersion := "3.8.4"
 organization := "com.eed3si9n"
 
@@ -39,14 +39,14 @@ lazy val plugin = projectMatrix
   )
 
 scmInfo := Some(
-  ScmInfo(url("https://github.com/eed3si9n/scruff"), "scm:git@github.com:eed3si9n/scruff.git")
+  ScmInfo(uri("https://github.com/eed3si9n/scruff"), "scm:git@github.com:eed3si9n/scruff.git")
 )
 developers := List(
   Developer(
     id = "eed3si9n",
     name = "Eugene Yokota",
     email = "@eed3si9n",
-    url = url("https://eed3si9n.com/"),
+    url = uri("https://eed3si9n.com/"),
   )
 )
 pomIncludeRepository := { _ =>
@@ -57,5 +57,5 @@ publishTo := {
   if version.value.endsWith("-SNAPSHOT") then Some("central-snapshots" at centralSnapshots)
   else localStaging.value
 }
-homepage := Some(url("https://github.com/eed3si9n/scruff"))
+homepage := Some(uri("https://github.com/eed3si9n/scruff"))
 licenses := List(License.MIT)
