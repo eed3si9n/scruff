@@ -15,6 +15,8 @@
 //!   the syntax of Java's `PathMatcher`, which must match a file's whole
 //!   absolute path. Include paths default to `.scala`, `.sbt`, `.sc` and
 //!   `.mill` files.
+//! - `[lint]`, the rules `scruff check` runs: `select`, `extend-select` and
+//!   `ignore`, as [`Selection`] describes. Without it, the default rules.
 //!
 //! From `.scalafmt.conf`, scruff reads only these settings, with scalafmt's
 //! meaning:
@@ -35,6 +37,8 @@ use std::fmt;
 use std::path::{Path, PathBuf};
 
 use regex::Regex;
+
+use crate::lint::{Rule, Selection};
 
 /// scruff's own configuration file.
 pub const SCRUFF_FILE: &str = ".scruff.toml";
@@ -61,6 +65,8 @@ pub struct Config {
     dialect: Dialect,
     /// Dialects for the files a pattern matches, the first match winning.
     dialect_overrides: Vec<(Matcher, Dialect)>,
+    /// The lint rules `scruff check` runs, from `[lint]`.
+    pub lint_rules: Vec<Rule>,
 }
 
 /// What new syntax a Scala dialect allows, which decides what scruff
@@ -205,6 +211,33 @@ impl fmt::Display for ConfigError {
 
 impl std::error::Error for ConfigError {}
 
+/// The `[lint]` table: `select`, `extend-select` and `ignore`, each a list
+/// of rules' names or codes.
+fn lint_selection(value: &toml::Value) -> Result<Selection, String> {
+    let table = value.as_table().ok_or("lint must be a table")?;
+    let mut selection = Selection::default();
+    for (key, value) in table {
+        let message = || format!("lint.{key} must be a list of strings");
+        let strings = value
+            .as_array()
+            .ok_or_else(message)?
+            .iter()
+            .map(|item| item.as_str().map(str::to_string).ok_or_else(message))
+            .collect::<Result<Vec<_>, _>>();
+        match key.as_str() {
+            "select" => selection.select = Some(strings?),
+            "extend-select" => selection.extend_select = strings?,
+            "ignore" => selection.ignore = strings?,
+            _ => {
+                return Err(format!(
+                    "unknown key lint.{key}; the keys are select, extend-select and ignore"
+                ));
+            }
+        }
+    }
+    Ok(selection)
+}
+
 /// A pattern a path must match, as scalafmt matches it.
 #[derive(Debug)]
 struct Matcher(Regex);
@@ -269,6 +302,7 @@ impl Config {
         let mut max_column = crate::fmt::FormatOptions::default().max_width;
         let mut patterns = Patterns::default();
         let mut dialect = DialectSetting::default();
+        let mut lint = Selection::default();
         for (key, value) in table {
             let strings = || -> Result<Vec<String>, String> {
                 let message = || format!("{key} must be a list of strings");
@@ -302,16 +336,18 @@ impl Config {
                             .to_string(),
                     );
                 }
+                "lint" => lint = lint_selection(value)?,
                 _ => {
                     return Err(format!(
                         "unknown key {key:?}; the keys are version, max-column, dialect, \
-                         include-paths and exclude-paths"
+                         include-paths, exclude-paths and lint"
                     ));
                 }
             }
         }
         let mut config = Config::new(path, max_column, patterns)?;
         config.dialect = dialect.resolve()?;
+        config.lint_rules = lint.rules().map_err(|e| format!("lint: {e}"))?;
         Ok(config)
     }
 
@@ -433,6 +469,7 @@ impl Config {
             exclude_dirs,
             dialect: Dialect::SCALA3,
             dialect_overrides: Vec::new(),
+            lint_rules: Rule::defaults(),
         })
     }
 
@@ -766,6 +803,30 @@ mod tests {
 
     fn scruff_config(text: &str) -> Result<Config, ConfigError> {
         Config::parse(Path::new("/p/.scruff.toml"), text)
+    }
+
+    #[test]
+    fn scruff_toml_lint_table() {
+        assert_eq!(scruff_config("").unwrap().lint_rules, Rule::defaults());
+        let c =
+            scruff_config("[lint]\nextend-select = [\"S002\"]\nignore = [\"no_return\"]").unwrap();
+        let expected: Vec<Rule> = Rule::ALL
+            .iter()
+            .copied()
+            .filter(|&r| (r.is_default() || r == Rule::NoVar) && r != Rule::NoReturn)
+            .collect();
+        assert_eq!(c.lint_rules, expected);
+        let message = |text: &str| scruff_config(text).unwrap_err().message;
+        assert_eq!(message("lint = 1"), "lint must be a table");
+        assert_eq!(
+            message("[lint]\nselect = \"S\""),
+            "lint.select must be a list of strings"
+        );
+        assert!(message("[lint]\nenable = []").starts_with("unknown key lint.enable"));
+        assert_eq!(
+            message("[lint]\nselect = [\"S3\"]"),
+            "lint: no rule is named or coded \"S3\""
+        );
     }
 
     #[test]

@@ -10,6 +10,7 @@ use clap::{Parser, Subcommand, ValueEnum};
 use rayon::prelude::*;
 use scruff::config::{Config, Locator};
 use scruff::fmt;
+use scruff::lint;
 use scruff::lossless_tree;
 
 /// Tools for working with Scala source code.
@@ -63,6 +64,43 @@ enum Command {
         /// in the exit code
         #[arg(short, long)]
         silent: bool,
+
+        /// When to color the output; `auto` colors it on a terminal, unless
+        /// `NO_COLOR` is set
+        #[arg(long, value_name = "WHEN", default_value = "auto")]
+        color: Color,
+    },
+    /// Check Scala files against the lint rules
+    ///
+    /// Files are found as `format` finds them, and follow the same
+    /// configuration's include and exclude paths.
+    ///
+    /// Prints each problem with the lines around it, as Ruff does, or with
+    /// `--output-format concise` as `file:line:col: code rule message`, then
+    /// a count.
+    ///
+    /// Runs the default rules, or those `[lint]` in `.scruff.toml` selects:
+    /// `select` replaces the defaults, `extend-select` adds to them, and
+    /// `ignore` turns rules off, each a list of rules' names or codes. The
+    /// rules are listed at the end.
+    ///
+    /// A comment `// scruff: ignore(S004)` or `// scruff: ignore(no_null)`
+    /// turns rules off for its line, or for the next line when it's on a
+    /// line of its own. It takes several rules, separated by commas.
+    ///
+    /// Exits with 1 if a rule flags anything, and with 2 if a file can't be
+    /// checked: it can't be read or has syntax errors.
+    #[command(after_long_help = rules_help())]
+    Check {
+        /// The files and directories to check; the current directory when
+        /// omitted. `-` reads standard input
+        #[arg(default_value = ".")]
+        files: Vec<PathBuf>,
+
+        /// How to show each problem: `full` with the code around it, as
+        /// Ruff does, or `concise`, one line each
+        #[arg(long, value_name = "FORMAT", default_value = "full")]
+        output_format: OutputFormat,
 
         /// When to color the output; `auto` colors it on a terminal, unless
         /// `NO_COLOR` is set
@@ -127,6 +165,18 @@ fn run(cli: Cli) -> ExitCode {
             };
             format(files, mode, Verbosity::from_flags(quiet, silent), paints)
         }
+        Command::Check {
+            files,
+            output_format,
+            color,
+        } => lint(
+            files,
+            output_format,
+            Paints {
+                out: Paint::new(color, &std::io::stdout()),
+                err: Paint::new(color, &std::io::stderr()),
+            },
+        ),
         Command::Parse { file, quiet } => parse(file, quiet),
         Command::Comments { file } => comments(file),
     }
@@ -141,6 +191,16 @@ enum Mode {
     Check,
     /// Print a unified diff of it.
     Diff,
+}
+
+/// How `scruff check` shows a problem.
+#[derive(Clone, Copy, PartialEq, ValueEnum)]
+enum OutputFormat {
+    /// The code and message, where it is, and the lines around it with the
+    /// problem marked, as Ruff shows it.
+    Full,
+    /// `file:line:col: code rule message`, one line each.
+    Concise,
 }
 
 /// When to color the output.
@@ -775,6 +835,323 @@ fn format_error(name: &str, source: &str, error: fmt::FormatError, paint: Paint)
     }
 }
 
+/// The rules, one per line, for `scruff check --help`.
+fn rules_help() -> String {
+    let mut rules = lint::Rule::ALL.to_vec();
+    // By category, in `Category::ALL`'s order, then by number.
+    rules.sort_by_key(|rule| {
+        let (category, number) = rule.code();
+        let index = lint::Category::ALL.iter().position(|&c| c == category);
+        (index, number)
+    });
+    let width = rules.iter().map(|r| r.name().len()).max().unwrap_or(0);
+    let letters: Vec<String> = lint::Category::ALL
+        .iter()
+        .map(|c| format!("`{}` {}", c.letter(), c.name()))
+        .collect();
+    let mut out = format!(
+        "Rules, by code; the letter is the category: {}.\n\n",
+        letters.join(", ")
+    );
+    for rule in rules {
+        let default = if rule.is_default() { " (default)" } else { "" };
+        out += &format!(
+            "  {}  {:width$}  {}{default}\n",
+            rule.code_text(),
+            rule.name(),
+            rule.summary()
+        );
+    }
+    out
+}
+
+/// `scruff check`: each file against the lint rules, in parallel, reported
+/// in the order given.
+fn lint(files: Vec<PathBuf>, format: OutputFormat, paints: Paints) -> ExitCode {
+    let error = |message: &str| eprint!("{}", paints.err.error(message));
+    let stdin = |f: &PathBuf| f.as_os_str() == "-";
+    if files.iter().any(stdin) && files.len() > 1 {
+        error("`-` reads standard input, so it can't come with files");
+        return ExitCode::from(2);
+    }
+
+    let mut code = 0;
+    let outcomes: Vec<Linted> = if files.len() == 1 && stdin(&files[0]) {
+        let rules = match Config::find(Path::new(".")) {
+            Ok(config) => config.map_or_else(lint::Rule::defaults, |c| c.lint_rules),
+            Err(message) => {
+                error(&message.to_string());
+                return ExitCode::from(2);
+            }
+        };
+        vec![match read_text(None) {
+            Ok((name, source)) => lint_source(&name, &source, &rules, format, paints),
+            Err(message) => Linted::failed(paints.err.error(&message)),
+        }]
+    } else {
+        let Collected {
+            files,
+            configs,
+            messages,
+        } = collect_files(&files);
+        for message in &messages {
+            error(message);
+            code = 2;
+        }
+        let mut reported = HashSet::new();
+        for file in &files {
+            if let Some((path, Err(message))) = configs.for_file(file)
+                && reported.insert(path)
+            {
+                error(message);
+                code = 2;
+            }
+        }
+        files
+            .par_iter()
+            .filter_map(|file| match configs.for_file(file) {
+                Some((_, Err(_))) => Some(Linted::failed(String::new())),
+                Some((_, Ok(config))) if !config.includes(file) => None,
+                Some((_, Ok(config))) => Some(lint_file(file, &config.lint_rules, format, paints)),
+                None => Some(lint_file(file, &lint::Rule::defaults(), format, paints)),
+            })
+            .collect()
+    };
+
+    let (mut problems, mut checked) = (0, 0);
+    for outcome in &outcomes {
+        print!("{}", outcome.output);
+        eprint!("{}", outcome.messages);
+        problems += outcome.problems;
+        if outcome.failed {
+            code = 2;
+        } else {
+            checked += 1;
+            if outcome.problems > 0 {
+                code = code.max(1);
+            }
+        }
+    }
+    if outcomes.is_empty() {
+        eprintln!(
+            "{} no files to check under the given paths",
+            paints.err.paint(WARNING, "warning:")
+        );
+    } else if problems > 0 {
+        let s = if problems == 1 { "" } else { "s" };
+        println!("Found {problems} problem{s}.");
+    } else if checked > 0 {
+        println!("All checks passed!");
+    }
+    ExitCode::from(code)
+}
+
+/// What checking one file came to.
+struct Linted {
+    /// The problems found, one per line.
+    output: String,
+    problems: usize,
+    /// Errors, for standard error.
+    messages: String,
+    failed: bool,
+}
+
+impl Linted {
+    fn failed(messages: String) -> Linted {
+        Linted {
+            output: String::new(),
+            problems: 0,
+            messages,
+            failed: true,
+        }
+    }
+}
+
+fn lint_file(file: &Path, rules: &[lint::Rule], format: OutputFormat, paints: Paints) -> Linted {
+    let name = file.strip_prefix(".").unwrap_or(file).display().to_string();
+    match std::fs::read_to_string(file) {
+        Ok(source) => lint_source(&name, &source, rules, format, paints),
+        Err(err) => Linted::failed(paints.err.error(&format!("can't read {name}: {err}"))),
+    }
+}
+
+fn lint_source(
+    name: &str,
+    source: &str,
+    rules: &[lint::Rule],
+    format: OutputFormat,
+    paints: Paints,
+) -> Linted {
+    let tree = lossless_tree::parse(source);
+    match lint::check_tree(&tree, rules) {
+        Ok(diagnostics) => {
+            let mut output = String::new();
+            for diagnostic in &diagnostics {
+                output += &match format {
+                    OutputFormat::Full => full_problem(name, &tree, diagnostic, paints.out),
+                    OutputFormat::Concise => concise_problem(name, &tree, diagnostic, paints.out),
+                };
+            }
+            Linted {
+                output,
+                problems: diagnostics.len(),
+                messages: String::new(),
+                failed: false,
+            }
+        }
+        Err(lint::LintError::SyntaxErrors(errors)) => {
+            let paint = paints.err;
+            let mut messages = String::new();
+            for error in errors {
+                let (line, col) = tree.line_col(error.range().start());
+                messages += &paint.error_at(&format!("{name}:{line}:{col}"), &error.to_string());
+            }
+            messages += &format!(
+                "{}: not checked because of syntax errors\n",
+                paint.paint(LOCATION, name)
+            );
+            Linted::failed(messages)
+        }
+    }
+}
+
+/// A problem on one line: `A.scala:3:19: S001 no_return message`.
+fn concise_problem(
+    name: &str,
+    tree: &lossless_tree::Tree,
+    d: &lint::Diagnostic,
+    paint: Paint,
+) -> String {
+    let (line, col) = tree.line_col(d.range.start());
+    format!(
+        "{}: {} {} {}\n",
+        paint.paint(LOCATION, &format!("{name}:{line}:{col}")),
+        paint.paint(ERROR, &d.rule.code_text()),
+        d.rule.name(),
+        d.message
+    )
+}
+
+/// A problem as Ruff shows it, with a blank line after it: the code and
+/// message, where it is, and the lines around it, two either side less
+/// blank ones at the edges, with the problem marked.
+///
+/// ```text
+/// S001 no_return `return` is not allowed; make the result the last expression
+///  --> A.scala:3:19
+///   |
+/// 1 | object A:
+/// 2 |   def f(x: Int): Int =
+/// 3 |     if x > 0 then return 1
+///   |                   ^^^^^^^^
+/// 4 |     0
+///   |
+/// ```
+///
+/// A problem over several lines is marked down the left of them, from
+/// where it starts to where it ends, as Ruff's annotate-snippets does. A
+/// tab shows as four spaces, as there.
+fn full_problem(
+    name: &str,
+    tree: &lossless_tree::Tree,
+    d: &lint::Diagnostic,
+    paint: Paint,
+) -> String {
+    let source = tree.syntax().text();
+    let mut lines: Vec<&str> = source
+        .split('\n')
+        .map(|line| line.strip_suffix('\r').unwrap_or(line))
+        .collect();
+    if source.ends_with('\n') {
+        lines.pop();
+    }
+    let line_text = |n: usize| lines.get(n - 1).copied().unwrap_or("");
+    let (start_line, start_col) = tree.line_col(d.range.start());
+    // The last character's place, since the range's end is past it.
+    let start = usize::from(d.range.start());
+    let last = source[..usize::from(d.range.end())]
+        .char_indices()
+        .next_back()
+        .map_or(start, |(i, _)| i.max(start));
+    let (end_line, end_col) = tree.line_col(lossless_tree::TextSize::try_from(last).unwrap());
+
+    // Two lines either side, less blank ones at the edges.
+    let mut first = start_line.saturating_sub(2).max(1);
+    let mut final_line = (end_line + 2).min(lines.len().max(end_line));
+    while first < start_line && line_text(first).trim().is_empty() {
+        first += 1;
+    }
+    while final_line > end_line && line_text(final_line).trim().is_empty() {
+        final_line -= 1;
+    }
+
+    let width = final_line.to_string().len();
+    let pad = " ".repeat(width);
+    let bar = paint.paint(GUTTER, "|");
+    let marker = |text: &str| format!("{pad} {bar} {}\n", paint.paint(ERROR, text));
+
+    let multiline = end_line > start_line;
+    let start_display = display_col(line_text(start_line), start_col);
+    let at_indent = line_text(start_line)
+        .chars()
+        .take(start_col - 1)
+        .all(char::is_whitespace);
+
+    let mut out = format!(
+        "{} {} {}\n{pad}{} {name}:{start_line}:{start_col}\n{pad} {bar}\n",
+        paint.paint(ERROR, &d.rule.code_text()),
+        paint.paint(LOCATION, d.rule.name()),
+        paint.paint(LOCATION, &d.message),
+        paint.paint(GUTTER, "-->"),
+    );
+    for n in first..=final_line {
+        let text = line_text(n).replace('\t', "    ");
+        let margin = match () {
+            _ if !multiline => "",
+            _ if n == start_line && at_indent => "/ ",
+            _ if n > start_line && n <= end_line => "| ",
+            _ => "  ",
+        };
+        let content = format!("{margin}{text}");
+        let content = content.trim_end();
+        let (left, right) = content.split_at(margin.len().min(content.len()));
+        let number = paint.paint(GUTTER, &format!("{n:>width$} |"));
+        if content.is_empty() {
+            out += &format!("{number}\n");
+        } else {
+            out += &format!("{number} {}{right}\n", paint.paint(ERROR, left));
+        }
+        if !multiline && n == start_line {
+            let end_display = display_col(line_text(end_line), end_col)
+                + if line_text(end_line).chars().nth(end_col - 1) == Some('\t') {
+                    4
+                } else {
+                    1
+                };
+            let carets = "^".repeat(end_display.saturating_sub(start_display).max(1));
+            out += &marker(&format!("{}{carets}", " ".repeat(start_display)));
+        } else if multiline && n == start_line && !at_indent {
+            out += &marker(&format!(" {}^", "_".repeat(start_display + 1)));
+        } else if multiline && n == end_line {
+            let end_display = display_col(line_text(end_line), end_col);
+            out += &marker(&format!("|{}^", "_".repeat(end_display + 1)));
+        }
+    }
+    if final_line > end_line {
+        out += &format!("{pad} {bar}\n");
+    }
+    out + "\n"
+}
+
+/// Where the character at 1-based column `col` of `line` shows, 0-based,
+/// with each tab before it shown as four spaces.
+fn display_col(line: &str, col: usize) -> usize {
+    line.chars()
+        .take(col - 1)
+        .map(|c| if c == '\t' { 4 } else { 1 })
+        .sum()
+}
+
 fn parse(file: Option<PathBuf>, quiet: bool) -> ExitCode {
     let (name, source) = match read_source(file) {
         Ok(input) => input,
@@ -925,6 +1302,130 @@ mod tests {
         assert_eq!(
             unified_diff("A.scala", source, formatted, Paint { on: false }),
             usual + "\n"
+        );
+    }
+
+    /// Each problem `rule` finds in `source`, shown in full, uncolored.
+    fn full(rule: lint::Rule, source: &str) -> String {
+        let tree = lossless_tree::parse(source);
+        lint::check_tree(&tree, &[rule])
+            .unwrap()
+            .iter()
+            .map(|d| full_problem("A.scala", &tree, d, Paint { on: false }))
+            .collect()
+    }
+
+    #[test]
+    fn a_problem_shows_its_line_with_context_as_ruff_does() {
+        let source = "object A:\n  def f(x: Int): Int =\n    if x > 0 then return 1\n    0\n";
+        assert_eq!(
+            full(lint::Rule::NoReturn, source),
+            "\
+S001 no_return `return` is not allowed; make the result the last expression
+ --> A.scala:3:19
+  |
+1 | object A:
+2 |   def f(x: Int): Int =
+3 |     if x > 0 then return 1
+  |                   ^^^^^^^^
+4 |     0
+  |
+
+"
+        );
+    }
+
+    #[test]
+    fn a_problem_in_color_has_the_same_text() {
+        let source = "object B {\n  val b = <ul>\n  </ul>\n  val s: String = null\n}\n";
+        let tree = lossless_tree::parse(source);
+        for d in lint::check_tree(&tree, lint::Rule::ALL).unwrap() {
+            let colored = full_problem("A.scala", &tree, &d, Paint { on: true });
+            assert!(colored.contains('\x1b'));
+            assert_eq!(
+                anstream::adapter::strip_str(&colored).to_string(),
+                full_problem("A.scala", &tree, &d, Paint { on: false })
+            );
+        }
+    }
+
+    #[test]
+    fn blank_lines_at_the_edges_are_left_out() {
+        let source = "\n\nval s: String = null\n\n\n";
+        assert_eq!(
+            full(lint::Rule::NoNull, source),
+            "\
+S004 no_null `null` is not allowed; use an `Option`
+ --> A.scala:3:17
+  |
+3 | val s: String = null
+  |                 ^^^^
+
+"
+        );
+    }
+
+    #[test]
+    fn a_problem_over_lines_is_marked_down_the_left() {
+        let source = "object B {\n  val b = <ul>\n    <li>a</li>\n  </ul>\n}\n";
+        assert_eq!(
+            full(lint::Rule::NoXml, source),
+            "\
+S007 no_xml XML literals are not allowed; Scala 3 will drop them, use XML string interpolation
+ --> A.scala:2:11
+  |
+1 |   object B {
+2 |     val b = <ul>
+  |  ___________^
+3 | |     <li>a</li>
+4 | |   </ul>
+  | |_______^
+5 |   }
+  |
+
+"
+        );
+    }
+
+    #[test]
+    fn one_starting_at_its_indentation_starts_with_a_slash() {
+        let source = "object C:\n  val x =\n    <p>\n      hi\n    </p>\n";
+        assert_eq!(
+            full(lint::Rule::NoXml, source),
+            "\
+S007 no_xml XML literals are not allowed; Scala 3 will drop them, use XML string interpolation
+ --> A.scala:3:5
+  |
+1 |   object C:
+2 |     val x =
+3 | /     <p>
+4 | |       hi
+5 | |     </p>
+  | |________^
+
+"
+        );
+    }
+
+    #[test]
+    fn tabs_show_as_four_spaces_and_wide_numbers_widen_the_gutter() {
+        let mut source = "object A {\n".to_string();
+        source += &"\n".repeat(8);
+        source += "def f(n: Int) = {\n\treturn n\n}\n}\n";
+        assert_eq!(
+            full(lint::Rule::NoReturn, &source),
+            "\
+S001 no_return `return` is not allowed; make the result the last expression
+  --> A.scala:11:2
+   |
+10 | def f(n: Int) = {
+11 |     return n
+   |     ^^^^^^^^
+12 | }
+13 | }
+   |
+
+"
         );
     }
 

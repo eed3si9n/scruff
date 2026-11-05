@@ -533,3 +533,135 @@ fn color_is_on_only_when_asked_or_on_a_terminal() {
     let out = scruff_in(&dir, &["format", "--color", "always", "-"], UNFORMATTED);
     assert_eq!(text(&out.stdout), FORMATTED);
 }
+
+#[test]
+fn check_reports_each_problem_in_order_and_exits_with_1() {
+    let dir = repository(
+        "check_returns",
+        &[
+            (
+                "A.scala",
+                "object A:\n  def f(x: Int): Int =\n    if x > 0 then return 1\n    return 0\n",
+            ),
+            ("B.scala", "object B:\n  var x = 1\n"),
+            (".scruff.toml", "[lint]\nextend-select = [\"no_var\"]\n"),
+        ],
+    );
+    let out = scruff_in(&dir, &["check", "--output-format", "concise"], "");
+    assert_eq!(out.status.code(), Some(1));
+    let no_return = "S001 no_return `return` is not allowed; make the result the last expression";
+    let no_var = "S002 no_var `var` is not allowed; use a `val`";
+    assert_eq!(
+        text(&out.stdout),
+        format!(
+            "A.scala:3:19: {no_return}\nA.scala:4:5: {no_return}\nB.scala:2:3: {no_var}\nFound 3 problems.\n"
+        )
+    );
+}
+
+#[test]
+fn check_passes_without_problems() {
+    let out = scruff(&["check", "-"], "object A:\n  def f(x: Int) = x + 1\n");
+    assert_eq!(out.status.code(), Some(0));
+    assert_eq!(text(&out.stdout), "All checks passed!\n");
+}
+
+#[test]
+fn check_refuses_syntax_errors_with_2() {
+    let out = scruff(&["check", "-"], "object A {\n  def f( = return 1\n");
+    assert_eq!(out.status.code(), Some(2));
+    assert_eq!(text(&out.stdout), "");
+    assert!(text(&out.stderr).contains("<stdin>: not checked because of syntax errors"));
+}
+
+#[test]
+fn check_runs_only_default_rules_without_a_lint_table() {
+    let dir = repository("check_defaults", &[("A.scala", "object A:\n  var x = 1\n")]);
+    let out = scruff_in(&dir, &["check"], "");
+    assert_eq!(out.status.code(), Some(0));
+    assert_eq!(text(&out.stdout), "All checks passed!\n");
+}
+
+#[test]
+fn check_follows_select_and_ignore() {
+    let source = "object A:\n  var x = 1\n  def f: Int = return x\n";
+    let dir = repository(
+        "check_select",
+        &[
+            ("A.scala", source),
+            (
+                ".scruff.toml",
+                "[lint]\nselect = [\"S\"]\nignore = [\"S001\"]\n",
+            ),
+        ],
+    );
+    let out = scruff_in(&dir, &["check", "--output-format", "concise"], "");
+    assert_eq!(out.status.code(), Some(1));
+    assert!(text(&out.stdout).starts_with("A.scala:2:3: S002 no_var"));
+    assert!(!text(&out.stdout).contains("S001"));
+    // Standard input follows the current directory's configuration.
+    let out = scruff_in(&dir, &["check", "--output-format", "concise", "-"], source);
+    assert!(text(&out.stdout).starts_with("<stdin>:2:3: S002 no_var"));
+    assert!(!text(&out.stdout).contains("S001"));
+}
+
+#[test]
+fn an_unknown_rule_in_the_config_exits_with_2() {
+    let dir = repository(
+        "check_unknown_rule",
+        &[
+            ("A.scala", "object A\n"),
+            (".scruff.toml", "[lint]\nignore = [\"no_such_rule\"]\n"),
+        ],
+    );
+    let out = scruff_in(&dir, &["check"], "");
+    assert_eq!(out.status.code(), Some(2));
+    assert!(
+        text(&out.stderr)
+            .contains(r#".scruff.toml: lint: no rule is named or coded "no_such_rule""#),
+        "{}",
+        text(&out.stderr)
+    );
+}
+
+#[test]
+fn check_help_lists_each_rule_on_its_own_line() {
+    let out = scruff(&["check", "--help"], "");
+    let help = text(&out.stdout);
+    assert!(
+        help.contains("\n  S001  no_return ") && help.contains("\n  S002  no_var "),
+        "{help}"
+    );
+    assert!(
+        help.lines()
+            .any(|line| line.starts_with("  S001") && line.ends_with("(default)")),
+        "{help}"
+    );
+}
+
+#[test]
+fn a_scruff_ignore_comment_hides_a_problem() {
+    let source = "\
+object A:
+  val a: String = null // scruff: ignore(S004)
+  // scruff: ignore(no_null)
+  val b: String = null
+  val c: String = null
+";
+    let out = scruff(&["check", "--output-format", "concise", "-"], source);
+    assert_eq!(out.status.code(), Some(1));
+    assert_eq!(
+        text(&out.stdout),
+        "<stdin>:5:19: S004 no_null `null` is not allowed; use an `Option`\nFound 1 problem.\n"
+    );
+}
+
+#[test]
+fn check_shows_each_problem_in_full_by_default() {
+    let out = scruff(&["check", "-"], "val s: String = null\n");
+    assert_eq!(out.status.code(), Some(1));
+    assert_eq!(
+        text(&out.stdout),
+        "S004 no_null `null` is not allowed; use an `Option`\n --> <stdin>:1:17\n  |\n1 | val s: String = null\n  |                 ^^^^\n\nFound 1 problem.\n"
+    );
+}
