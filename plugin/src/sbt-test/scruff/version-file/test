@@ -1,5 +1,5 @@
 # Without .scruff.toml, the default version.
-> checkVersion 0.1.0
+> checkVersion default
 
 # The top-level version in .scruff.toml, not the one under a table.
 $ copy-file scruff-toml.txt .scruff.toml

@@ -36,9 +36,6 @@ object ScruffPlugin extends AutoPlugin {
 
   import autoImport.*
 
-  /** The scruff version when .scruff.toml doesn't name one. */
-  val DefaultVersion = "0.2.0"
-
   private val VersionLine = """\s*version\s*=\s*["']([^"']*)["'].*""".r
 
   /** The top-level `version` in `config`, a .scruff.toml, if it has one.
@@ -60,7 +57,7 @@ object ScruffPlugin extends AutoPlugin {
 
   override def buildSettings: Seq[Def.Setting[?]] = Seq(
     scruffVersion := configVersion((ThisBuild / baseDirectory).value / ".scruff.toml")
-      .getOrElse(DefaultVersion),
+      .getOrElse(ScruffBuildInfo.scruffVersion),
     scruffBinary := ScruffDownload.binary(scruffVersion.value, streams.value.log),
     scruffFmt := format(scruffBinary.value, (ThisBuild / baseDirectory).value, streams.value.log),
     scruffFmtCheck := check(
