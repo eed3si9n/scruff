@@ -14,8 +14,8 @@ import scala.sys.process.Process
 import scala.util.control.NonFatal
 
 /** Downloads scruff's release binaries from GitHub, checks them against the
-  * release's `SHA256SUMS`, and keeps them in a cache shared by every build.
-  */
+ *  release's `SHA256SUMS`, and keeps them in a cache shared by every build.
+ */
 object ScruffDownload {
   val releases = "https://github.com/eed3si9n/scruff/releases/download"
 
@@ -95,10 +95,10 @@ object ScruffDownload {
   }
 
   /** Downloads `url` to `to` with the HTTP client sbt itself uses, which
-    * follows GitHub's redirects to its download servers. The status is
-    * checked here: sbt 2's client doesn't fail on one, and sbt 1's
-    * `download` doesn't either.
-    */
+   *  follows GitHub's redirects to its download servers. The status is
+   *  checked here: sbt 2's client doesn't fail on one, and sbt 1's
+   *  `download` doesn't either.
+   */
   private def fetch(url: String, to: File, version: String): File = {
     val response =
       try Await.result(Http.http.processFull(Request(url)), 10.minutes)

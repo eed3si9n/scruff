@@ -29,8 +29,8 @@ object ScruffPlugin extends AutoPlugin {
   }
 
   /** Formats the configuration's sources, for `compile`, when one has
-    * changed since the last time.
-    */
+   *  changed since the last time.
+   */
   @transient
   private val scruffFmtSources = taskKey[Unit]("Formats the configuration's sources with scruff")
 
@@ -42,9 +42,9 @@ object ScruffPlugin extends AutoPlugin {
   private val VersionLine = """\s*version\s*=\s*["']([^"']*)["'].*""".r
 
   /** The top-level `version` in `config`, a .scruff.toml, if it has one.
-    * Lines after the first `[table]` belong to that table, so they're not
-    * looked at.
-    */
+   *  Lines after the first `[table]` belong to that table, so they're not
+   *  looked at.
+   */
   def configVersion(config: File): Option[String] =
     if (!config.isFile) None
     else
@@ -95,8 +95,8 @@ object ScruffPlugin extends AutoPlugin {
     )
 
   /** Each source and when it was last modified, to tell whether one has
-    * changed since scruff formatted them.
-    */
+   *  changed since scruff formatted them.
+   */
   private def stamps(sources: Seq[File]): String = sources
     .map(f => s"${f.getAbsolutePath}\t${f.lastModified}")
     .sorted
@@ -104,8 +104,8 @@ object ScruffPlugin extends AutoPlugin {
 
 
   /** Runs `binary format` on `root`, failing if scruff can't run or exits
-    * with an error.
-    */
+   *  with an error.
+   */
   def format(binary: File, root: File, log: Logger): Unit =
     run(binary, root, log, Nil, Seq(".")) match {
       case 0    => ()
@@ -113,8 +113,8 @@ object ScruffPlugin extends AutoPlugin {
     }
 
   /** Runs `binary format --check` on `root`, which writes nothing and shows
-    * how each file would change, failing if any would.
-    */
+   *  how each file would change, failing if any would.
+   */
   def check(binary: File, root: File, log: Logger): Unit =
     run(binary, root, log, Seq("--check"), Seq(".")) match {
       case 0 => ()
@@ -125,8 +125,8 @@ object ScruffPlugin extends AutoPlugin {
     }
 
   /** Runs `binary format` on `dirs` before compiling. A file scruff can't
-    * format is only a warning: the compiler reports what's wrong with it.
-    */
+   *  format is only a warning: the compiler reports what's wrong with it.
+   */
   def formatSources(binary: File, root: File, dirs: Seq[File], log: Logger): Unit =
     if (dirs.nonEmpty) {
       val paths = dirs.map(dir => IO.relativize(root, dir).getOrElse(dir.getAbsolutePath))
@@ -137,8 +137,8 @@ object ScruffPlugin extends AutoPlugin {
     }
 
   /** Runs `binary format` in `root` on `paths`, relative to `root` so files
-    * show relative to the build's root.
-    */
+   *  show relative to the build's root.
+   */
   private def run(
       binary: File,
       root: File,
