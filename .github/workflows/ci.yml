@@ -11,8 +11,48 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  # Decides whether the Rust tests and builds need to run, so that changes
+  # only to docs or Scala skip them.
+  changes:
+    name: Changed files
+    runs-on: ubuntu-latest
+    outputs:
+      rust: ${{ steps.changes.outputs.rust }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - id: changes
+        shell: bash
+        env:
+          EVENT: ${{ github.event_name }}
+          REF: ${{ github.ref }}
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          PUSH_BEFORE: ${{ github.event.before }}
+        run: |
+          # Tags and manual runs always build; so does a push with no usable base.
+          base=""
+          if [[ "$EVENT" == "pull_request" ]]; then
+            base=$PR_BASE
+          elif [[ "$EVENT" == "push" && "$REF" != refs/tags/* ]]; then
+            base=$PUSH_BEFORE
+          fi
+          rust=true
+          if [[ -n "$base" && ! "$base" =~ ^0+$ ]] &&
+             files=$(git diff --name-only "$base" HEAD); then
+            echo "Changed files:"
+            echo "$files"
+            # Everything the Rust build and tests read, and this workflow.
+            if ! grep -qE '^(src/|tests/|examples/|Cargo\.(toml|lock)$|\.github/workflows/ci\.yml$)' <<< "$files"; then
+              rust=false
+            fi
+          fi
+          echo "rust=$rust"
+          echo "rust=$rust" >> "$GITHUB_OUTPUT"
+
   test:
     name: Test (${{ matrix.os }})
+    needs: changes
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -27,13 +67,17 @@ jobs:
       # Runs the defaults, `scruff format --check` and `scruff check`, on this repo.
       # - name: check Scala code format and lint
       - uses: ./
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-      - run: cargo test --locked
+      - if: needs.changes.outputs.rust == 'true'
+        uses: dtolnay/rust-toolchain@stable
+      - if: needs.changes.outputs.rust == 'true'
+        uses: Swatinem/rust-cache@v2
+      - if: needs.changes.outputs.rust == 'true'
+        run: cargo test --locked
 
   build:
     name: Build (${{ matrix.target }})
-    needs: test
+    needs: [changes, test]
+    if: needs.changes.outputs.rust == 'true'
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -109,7 +153,8 @@ jobs:
 
   build-macos:
     name: Build (macOS)
-    needs: test
+    needs: [changes, test]
+    if: needs.changes.outputs.rust == 'true'
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v7
