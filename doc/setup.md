@@ -1,44 +1,71 @@
 # Setup
 
+The native binaries are published to GitHub Releases <https://github.com/eed3si9n/scruff/releases/tag/v{{scruff_version}}>.
 
-The native binaries are published to GitHub Releases <https://github.com/eed3si9n/scruff/releases/tag/v0.1.0>.
+## `.scruff.toml`
+
+`.scruff.toml` is used by the `scruff` CLI for its configuration.
+
+```toml
+version = "{{scruff_version}}"
+dialect = "scala3"
+
+exclude-paths = [
+  "glob:**/src/sbt-test/**",
+]
+
+[lint]
+# default rules
+# select = [
+#   "untyped_implicit_val",
+#   "no_return",
+#   "no_null",
+#   "no_xml",
+#   "no_procedure_syntax",
+# ]
+```
+
+Both GitHub Action and sbt-scruff also use `.scruff.toml` for the scruff version. In other words, it would follow the version specified in `.scruff.toml` ({{scruff_version}}) even if the sbt-scruff version is 0.2.0.
 
 ## Setting up GitHub Actions
 
-Instead of calling `scruffFmtCheck`, you can run the scruff CLI on GitHub Actions as follows:
+Instead of calling `scruffFmtCheck`, you can run the `scruff` CLI on GitHub Actions as follows:
 
 ```yaml
-    - uses: actions/checkout@v7
-    # add this immediately after actions/checkout
-    - uses: eed3si9n/scruff@b3030eb89b4bf1a60a130966c971d6d49beed7b8
-    - uses: actions/setup-java@v6
-      with:
-        distribution: "${{ matrix.distribution }}"
-        java-version: "${{ matrix.java }}"
-        cache: "sbt"
+- uses: actions/checkout@v7
+# add this immediately after actions/checkout
+- uses: eed3si9n/scruff@v{{scruff_version}}
+  with:
+    format: true
+    lint: true
+- uses: actions/setup-java@v6
+  with:
+    distribution: "${{ matrix.distribution }}"
+    java-version: "${{ matrix.java }}"
+    cache: "sbt"
 ```
 
-This action finishes in 1 to 2 seconds, faster than setting up JDK.
+By default the action runs both `scruff fmt --check` and `scruff check`. This action typically finishes in 1 to 2 seconds, faster than setting up JDK.
 
 ## sbt-scruff
 
-For convenience, We've also created an sbt plugin that adds `scruffFmt`, `scruffFmtCheck`, `scruff`, `scruffFmtOnCompile`, and `scruffCheckOnCompile`.
+For convenience, We've also created an sbt plugin that adds `scruff`, `scruffFmt`, `scruffFmtCheck`, `scruffFmtOnCompile`, and `scruffCheckOnCompile`.
 
 ```scala
 // project/plugins.sbt
-addSbtPlugin("com.eed3si9n" % "sbt-scruff" % "0.1.0")
+addSbtPlugin("com.eed3si9n" % "sbt-scruff" % "0.2.2")
 ```
 
 The first time you call `scruffFmt`, it will download the binary:
 
 ```bash
 sbt:scruff-root> scruffFmt
-[info] downloading scruff 0.1.0 for universal-apple-darwin
+[info] downloading scruff {{scruff_version}} for universal-apple-darwin
 [info] 4 files left unchanged
 [success] elapsed time: 1 s
 ```
 
-`scruff` runs the scruff CLI in the build's root with the arguments you give it, and fails if scruff exits with an error. For example, to check the build against the lint rules (scruff 0.2.0 or later):
+`scruff` runs the scruff CLI in the build's root with the arguments you give it, and fails if scruff exits with an error. For example, to check the build against the lint rules (scruff 0.2.2 or later):
 
 ```bash
 sbt:scruff-root> scruff check

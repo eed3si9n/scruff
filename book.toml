@@ -12,3 +12,8 @@ additional-css = [
   "doc/custom-202602.css",
   "doc/mdbook-admonish.css"
 ]
+
+[preprocessor.variables]
+
+[preprocessor.variables.variables]
+scruff_version = "0.2.2"

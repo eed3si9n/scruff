@@ -1,9 +1,18 @@
 # scruff fmt
 
-
 ## Synopsis
 
-`scruff` `fmt` \[`--check` \] \[ _file_ | _dir..._ \]
+`scruff` `fmt` \[ _options_ \] \[ _file_ | _dir..._ | `-` \]
+
+Formats the given files and directories in place, or the current directory when none are given. `-` reads standard input and prints the result. `scruff format` is the same command.
+
+| Option                        | Effect                                                                                      |
+| ----------------------------- | ------------------------------------------------------------------------------------------- |
+| `--check`                     | Write nothing; show how each file would change, and exit with 1 if any would                |
+| `--diff`                      | Write nothing; print a unified diff of each change, and exit with 1 if any would            |
+| `-q`, `--quiet`               | Print only the diffs: no file count, no warnings, errors only with `--check`                |
+| `-s`, `--silent`              | Print nothing but the formatted text or the diff; errors show only in the exit code         |
+| <nobr>`--color` _when_</nobr> | `auto` (default), `always` or `never`; `auto` colors on a terminal unless `NO_COLOR` is set |
 
 ## Scruff formatter
 

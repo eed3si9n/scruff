@@ -1,0 +1,86 @@
+#!/usr/bin/env bash
+# Runs scruff at the version `.scruff.toml` in the current directory names,
+# downloading it from GitHub Releases on first use, as action.yml does.
+#
+#   ./scruff.sh format --check
+#   ./scruff.sh check
+#
+# SCRUFF_VERSION overrides the version in .scruff.toml. Binaries are kept
+# in $XDG_CACHE_HOME/scruff (~/.cache/scruff by default).
+set -euo pipefail
+
+# Used when .scruff.toml names no version; keep in step with action.yml.
+SCRUFF_DEFAULT_VERSION=0.2.0
+
+die() {
+  echo "scruff.sh: $*" >&2
+  exit 1
+}
+
+version=${SCRUFF_VERSION:-}
+if [[ -z "$version" && -f .scruff.toml ]]; then
+  # The top-level `version = "x.y.z"` key, before any [table].
+  version=$(awk -v q="[\"']" '
+    /^[ \t]*\[/ { exit }
+    /^[ \t]*version[ \t]*=/ {
+      v = $0; sub("^[^=]*=[ \t]*" q, "", v); sub(q ".*$", "", v)
+      print v; exit
+    }' .scruff.toml | tr -d '\r')
+fi
+if [[ -z "$version" ]]; then
+  version=$SCRUFF_DEFAULT_VERSION
+  echo "scruff.sh: no version in .scruff.toml; using scruff $version" >&2
+fi
+[[ "$version" =~ ^[0-9A-Za-z.+-]+$ ]] || die "invalid scruff version '$version'"
+
+# Release asset names follow the CI build matrix.
+case "$(uname -s)-$(uname -m)" in
+  Linux-x86_64)               platform=x86_64-pc-linux;        ext=tar.gz; exe=scruff ;;
+  Linux-aarch64 | Linux-arm64) platform=aarch64-pc-linux;      ext=tar.gz; exe=scruff ;;
+  Darwin-*)                   platform=universal-apple-darwin; ext=tar.gz; exe=scruff ;;
+  # Git Bash, MSYS2 and Cygwin; Windows on ARM runs the x86_64 binary.
+  MINGW* | MSYS* | CYGWIN*)   platform=x86_64-pc-win32;        ext=zip;    exe=scruff.exe ;;
+  *) die "scruff has no binary for $(uname -s) $(uname -m)" ;;
+esac
+
+name="scruff-$platform-$version"
+toolpath="${XDG_CACHE_HOME:-$HOME/.cache}/scruff/$version"
+bin="$toolpath/$name/$exe"
+
+if [[ ! -f "$bin" ]]; then
+  asset="$name.$ext"
+  base="https://github.com/eed3si9n/scruff/releases/download/v$version"
+  echo "scruff.sh: downloading scruff $version" >&2
+  mkdir -p "$toolpath"
+  tmp=$(mktemp -d "$toolpath/.download.XXXXXX")
+  trap 'rm -rf "$tmp"' EXIT
+  curl -fsSL --retry 3 -o "$tmp/$asset" "$base/$asset"
+  curl -fsSL --retry 3 -o "$tmp/SHA256SUMS" "$base/SHA256SUMS"
+
+  # Check the archive against the release's SHA256SUMS.
+  expected=$(awk -v f="$asset" '$2 == f { print $1 }' "$tmp/SHA256SUMS")
+  if command -v sha256sum > /dev/null; then
+    actual=$(sha256sum "$tmp/$asset" | awk '{ print $1 }')
+  else
+    actual=$(shasum -a 256 "$tmp/$asset" | awk '{ print $1 }')
+  fi
+  if [[ -z "$expected" || "$expected" != "$actual" ]]; then
+    die "checksum mismatch for $asset (expected '$expected', got '$actual')"
+  fi
+
+  # Unpack beside the cache, then move into place, so an interrupted
+  # download never leaves a half-written binary behind.
+  if [[ "$ext" == zip ]]; then
+    unzip -o -q "$tmp/$asset" -d "$tmp/out"
+  else
+    mkdir -p "$tmp/out"
+    tar xzf "$tmp/$asset" -C "$tmp/out"
+  fi
+  [[ -f "$tmp/out/$name/$exe" ]] || die "$name/$exe not found in $asset"
+  rm -rf "${toolpath:?}/$name"
+  mv "$tmp/out/$name" "$toolpath/$name"
+  rm -rf "$tmp"
+  trap - EXIT
+fi
+
+exec "$bin" "$@"
