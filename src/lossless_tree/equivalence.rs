@@ -43,7 +43,7 @@ use std::fmt;
 
 use super::{
     NodeOrToken, SyntaxElement, SyntaxKind, SyntaxNode, SyntaxToken, SyntaxTrivia, TextSize, Tree,
-    TriviaKind, WalkEvent, parse,
+    TriviaKind, WalkEvent, parse, scaladoc::scaladoc_lines,
 };
 
 /// The first way two texts differ.
@@ -842,7 +842,9 @@ fn is_lone_rename_brace(token: &SyntaxToken<'_>) -> bool {
 
 /// Whether two comments say the same. The indentation of a comment's lines
 /// after the first carries no meaning, so a formatter may move them with
-/// the code: a Scaladoc's ` *` lines follow its `/**`.
+/// the code: a Scaladoc's ` *` lines follow its `/**`. Nor does a
+/// Scaladoc's gutter: where its `*`s go, the gap after them, or whether its
+/// text starts on `/**`'s line.
 fn same_comment(a: &str, b: &str) -> bool {
     fn lines(s: &str) -> impl Iterator<Item = &str> {
         s.lines().enumerate().map(|(i, l)| {
@@ -853,7 +855,9 @@ fn same_comment(a: &str, b: &str) -> bool {
             }
         })
     }
-    a == b || lines(a).eq(lines(b))
+    a == b
+        || lines(a).eq(lines(b))
+        || matches!((scaladoc_lines(a), scaladoc_lines(b)), (Some(x), Some(y)) if x == y)
 }
 
 fn check_comments(before: &Tree, after: &Tree) -> Result<(), Difference> {

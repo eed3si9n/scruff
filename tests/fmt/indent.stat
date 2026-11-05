@@ -104,7 +104,7 @@ object A:
 dialect = scala213
 ===
 object A {
-    /** Does it.
+    /** Spam and eggs.
       *
       * @param a the input
       */
@@ -112,10 +112,10 @@ object A {
 }
 >>>
 object A {
-  /** Does it.
-    *
-    * @param a the input
-    */
+  /** Spam and eggs.
+   *
+   *  @param a the input
+   */
   def f(a: Int) = a
 }
 

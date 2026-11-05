@@ -14,7 +14,7 @@ use crate::doc::{AlignPart, Doc, FirstLine, PrintOptions, Shift, print};
 use crate::lossless_tree::{
     Difference, NodeOrToken, SyntaxElement, SyntaxError, SyntaxKind, SyntaxNode, SyntaxToken,
     SyntaxTrivia, TextRange, TextSize, Tree, TriviaKind, VerbatimRange, VerbatimReason,
-    check_equivalent_trees, parse,
+    check_equivalent_trees, parse, scaladoc_lines,
 };
 
 /// Formatting is deliberately not configurable beyond this. Indentation is
@@ -2313,19 +2313,38 @@ impl<'t> Formatter<'t> {
 
     /// A verbatim range, copied. A multi-line comment starting a line that
     /// moves moves all its lines by as much, so a Scaladoc's ` *` lines stay
-    /// under its `/**`.
+    /// under its `/**`. A Scaladoc starting a line is in Scala 3's style
+    /// first, as [`scaladoc`] writes it, and one with one line of text is
+    /// on one line where it fits.
     fn verbatim_range(&self, v: VerbatimRange) -> Doc<'t> {
         let text = &self.text[v.range];
         let start = v.range.start();
-        if v.reason != VerbatimReason::Comment || self.layout.offset(start).is_none() {
+        if v.reason != VerbatimReason::Comment {
             return Doc::verbatim(text);
         }
         let line_start = self.text[..usize::from(start)]
             .rfind('\n')
             .map_or(0, |i| i + 1);
-        Doc::Relative {
-            text: text.into(),
-            column: self.text[line_start..usize::from(start)].chars().count(),
+        let before = &self.text[line_start..usize::from(start)];
+        let column = before.chars().count();
+        let lines = match before.bytes().all(|b| b == b' ') {
+            true => scaladoc_lines(text),
+            false => None,
+        };
+        let broken: std::borrow::Cow<'t, str> = match &lines {
+            Some(lines) => scaladoc(lines, column).into(),
+            None => text.into(),
+        };
+        let broken = match self.layout.offset(start) {
+            None => Doc::verbatim(broken),
+            Some(_) => Doc::Relative {
+                text: broken,
+                column,
+            },
+        };
+        match lines.as_deref() {
+            Some([only]) => Doc::if_break(broken, Doc::text(format!("/** {only} */"))).group(),
+            _ => broken,
         }
     }
 
@@ -2337,6 +2356,34 @@ impl<'t> Formatter<'t> {
             _ => Doc::text(text),
         }
     }
+}
+
+/// A Scaladoc's text `lines`, as [`scaladoc_lines`] reads them, with a
+/// gutter for `/**` at `column`, in Scala 3's style: the text starting on
+/// `/**`'s line, each later line's `*` under the first `*` of `/**`, and two
+/// spaces after it, so the text lines up with the first line's.
+fn scaladoc(lines: &[&str], column: usize) -> String {
+    let gutter = format!("\n{}*", " ".repeat(column + 1));
+    let mut out = String::from("/**");
+    let rest = match lines.split_first() {
+        // A blank first line stays below `/**`.
+        Some((first, rest)) if !first.is_empty() => {
+            out.push(' ');
+            out.push_str(first);
+            rest
+        }
+        _ => lines,
+    };
+    for line in rest {
+        out.push_str(&gutter);
+        if !line.is_empty() {
+            out.push_str("  ");
+            out.push_str(line);
+        }
+    }
+    out.push_str(&gutter);
+    out.push('/');
+    out
 }
 
 /// A block of one expression split for [`Formatter::braced`].

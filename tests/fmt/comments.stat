@@ -128,11 +128,11 @@ def f =
   // one
   1 // done
 
-<<< a doc comment before a definition stays as written
+<<< a doc comment before a definition gets Scala 3's gutter
 dialect = scala213
 ===
 object A {
-  /** Does it.
+  /** Spam and eggs.
     *
     * @param a  the input
     */
@@ -140,12 +140,118 @@ object A {
 }
 >>>
 object A {
-  /** Does it.
-    *
-    * @param a  the input
-    */
+  /** Spam and eggs.
+   *
+   *  @param a  the input
+   */
   def f(a: Int) = a
 }
+
+<<< Scaladoc in Scala 3's style stays as written
+/** The type `[tparams := paramRefs] tp`, where `tparams` can be
+ *  either a list of type parameter symbols or a list of lambda parameters
+ *
+ *  @pre If `tparams` is a list of lambda parameters, then it must be the
+ *       full, in-order list of type parameters of some type constructor, as
+ *       can be obtained using `TypeApplications#typeParams`.
+ */
+def f = 1
+>>>
+/** The type `[tparams := paramRefs] tp`, where `tparams` can be
+ *  either a list of type parameter symbols or a list of lambda parameters
+ *
+ *  @pre If `tparams` is a list of lambda parameters, then it must be the
+ *       full, in-order list of type parameters of some type constructor, as
+ *       can be obtained using `TypeApplications#typeParams`.
+ */
+def f = 1
+
+<<< JavaDoc style Scaladoc: text moves up to the opening, two spaces after each star
+/**
+ * Spam and eggs.
+ *
+ * {{{
+ *   f(1)
+ * }}}
+ */
+def f(a: Int) = a
+>>>
+/** Spam and eggs.
+ *
+ *  {{{
+ *    f(1)
+ *  }}}
+ */
+def f(a: Int) = a
+
+<<< a blank line after the opening stays below it
+/**
+ *
+ * Spam and eggs.
+ */
+def f = 1
+>>>
+/**
+ *
+ *  Spam and eggs.
+ */
+def f = 1
+
+<<< a Scaladoc with lines outside the gutter gets one
+/** Spam and eggs.
+  eggs
+  {{{
+    spam(eggs)
+  }}}
+  */
+def f = 1
+>>>
+/** Spam and eggs.
+ *  eggs
+ *  {{{
+ *    spam(eggs)
+ *  }}}
+ */
+def f = 1
+
+<<< a Scaladoc ending on a line of text stays as written
+/** Spam and eggs.
+  * Eggs. */
+def f = 1
+/** Spam.
+def spam = {
+  eggs
+}*/
+def g = 1
+>>>
+/** Spam and eggs.
+  * Eggs. */
+def f = 1
+/** Spam.
+def spam = {
+  eggs
+}*/
+def g = 1
+
+<<< a block comment is not a Scaladoc
+/*
+  * Spam.
+  */
+def f = 1
+>>>
+/*
+  * Spam.
+  */
+def f = 1
+
+<<< a Scaladoc after code stays as written
+val a = 1 /** Spam
+  * and eggs.
+  */
+>>>
+val a = 1 /** Spam
+  * and eggs.
+  */
 
 <<< a comment touching code gets a space on each side
 @inline/* hot */def f = 1
@@ -211,3 +317,35 @@ f(/* c */x)
 val x = 1/* a */  /* b */
 f(/* c */x)
 // format: on
+
+<<< a Scaladoc with one line of text goes on one line
+/**
+ * Spam and eggs.
+ */
+def f = 1
+/** Eggs and spam.
+  */
+def g = 1
+/** Spam.
+ *
+ */
+def h = 1
+>>>
+/** Spam and eggs. */
+def f = 1
+/** Eggs and spam. */
+def g = 1
+/** Spam. */
+def h = 1
+
+<<< a Scaladoc with one line of text that doesn't fit on one line keeps its gutter
+maxColumn = 25
+===
+/**
+ * Spam, eggs, spam and spam.
+ */
+def f = 1
+>>>
+/** Spam, eggs, spam and spam.
+ */
+def f = 1

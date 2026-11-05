@@ -6,8 +6,8 @@ package a.b
 import x.{ y, z }
 
 /** Docs.
-  * More.
-  */
+ *  More.
+ */
 class A(x: Int) extends B {
   def f(y: Int) = x + y // add
 
@@ -19,8 +19,8 @@ package a.b
 import x.{ y, z }
 
 /** Docs.
-  * More.
-  */
+ *  More.
+ */
 class A(x: Int) extends B {
   def f(y: Int) = x + y // add
 

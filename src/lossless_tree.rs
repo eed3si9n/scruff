@@ -11,6 +11,7 @@ use std::sync::OnceLock;
 pub use equivalence::{
     Difference, DifferenceKind, Location, check_equivalent, check_equivalent_trees,
 };
+pub(crate) use scaladoc::scaladoc_lines;
 pub(crate) use equivalence::{
     is_extends_separator, is_implicit_clause_keyword, is_type_wildcard_place,
 };
@@ -23,6 +24,7 @@ pub use verbatim::{VerbatimRange, VerbatimReason};
 
 mod equivalence;
 mod indentation;
+mod scaladoc;
 mod syntax_kind;
 mod trivia;
 mod verbatim;
