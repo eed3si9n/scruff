@@ -86,6 +86,9 @@ object ScruffPlugin extends AutoPlugin {
         val args = Def.spaceDelimited("<args>").parsed
         runArgs(scruffBinary.value, (ThisBuild / baseDirectory).value, streams.value.log, args)
       },
+      // It runs on the whole build already. sbt doesn't merge an input task
+      // run for each aggregated project, so it would run once for each.
+      scruff / aggregate := false,
     )
 
   override def projectSettings: Seq[Def.Setting[?]] =

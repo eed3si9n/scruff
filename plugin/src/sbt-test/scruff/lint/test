@@ -1,5 +1,8 @@
-# `scruff` passes its arguments to the CLI, so `scruff check` lints.
+# `scruff` passes its arguments to the CLI, so `scruff check` lints. It runs
+# once, on the whole build, though the root aggregates sub.
+> resetRuns
 > scruff check
+> checkRuns 1
 
 # `null` breaks rule S004, so the check fails.
 $ copy-file null-B.txt src/main/scala/B.scala
