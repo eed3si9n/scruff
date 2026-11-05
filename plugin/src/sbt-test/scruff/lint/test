@@ -1,0 +1,11 @@
+# `scruff` passes its arguments to the CLI, so `scruff check` lints.
+> scruff check
+
+# `null` breaks rule S004, so the check fails.
+$ copy-file null-B.txt src/main/scala/B.scala
+-> scruff check
+-> scruff check --output-format concise src
+
+$ delete src/main/scala/B.scala
+> scruff check
+> scruff format --check src

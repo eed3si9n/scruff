@@ -1,0 +1,16 @@
+# Code the default rules accept compiles.
+> compile
+
+# `null` breaks rule S004, so compiling fails, after formatting the file.
+$ copy-file null-B.txt src/main/scala/B.scala
+-> compile
+$ must-mirror src/main/scala/B.scala expected/B.scala
+
+# It's checked again, not skipped as unchanged, so it still fails.
+-> compile
+
+$ delete src/main/scala/B.scala
+> compile
+
+# A project can turn it off.
+> off/compile

@@ -22,7 +22,7 @@ This action finishes in 1 to 2 seconds, faster than setting up JDK.
 
 ## sbt-scruff
 
-For convenience, We've also created an sbt plugin that adds `scruffFmt`, `scruffFmtCheck`, and `scruffFmtOnCompile`.
+For convenience, We've also created an sbt plugin that adds `scruffFmt`, `scruffFmtCheck`, `scruff`, `scruffFmtOnCompile`, and `scruffCheckOnCompile`.
 
 ```scala
 // project/plugins.sbt
@@ -38,8 +38,20 @@ sbt:scruff-root> scruffFmt
 [success] elapsed time: 1 s
 ```
 
+`scruff` runs the scruff CLI in the build's root with the arguments you give it, and fails if scruff exits with an error. For example, to check the build against the lint rules (scruff 0.2.0 or later):
+
+```bash
+sbt:scruff-root> scruff check
+```
+
 To enable formatting on-compile:
 
 ```scala
 ThisBuild / scruffFmtOnCompile := true
+```
+
+To check the lint rules on-compile, after formatting, failing the compile if a rule flags anything:
+
+```scala
+ThisBuild / scruffCheckOnCompile := true
 ```
