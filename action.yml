@@ -1,5 +1,5 @@
 name: "Scruff"
-description: "Installs the scruff Scala formatter and checks formatting"
+description: "Installs the scruff Scala formatter and checks formatting and lint rules"
 branding:
   icon: "check-square"
   color: "red"
@@ -7,13 +7,17 @@ inputs:
   version:
     description: >-
       The scruff version to install, from GitHub Releases. `auto` reads `version` from
-      `.scruff.toml` at the workspace root, and falls back to 0.1.0
+      `.scruff.toml` at the workspace root, and falls back to SCRUFF_DEFAULT_VERSION
     required: true
     default: auto
-  args:
-    description: "Arguments passed to scruff; empty to only install it and add it to PATH"
+  format:
+    description: "Run `scruff format --check`"
     required: false
-    default: format --check
+    default: "true"
+  lint:
+    description: "Run `scruff check`, the linter; needs scruff 0.2.0 or later"
+    required: false
+    default: "true"
 runs:
   using: "composite"
   steps:
@@ -24,7 +28,7 @@ runs:
         SCRUFF_VERSION: ${{ inputs.version }}
         SCRUFF_CACHE_KEY_VERSION: 1
         # Used when `auto` finds no version in .scruff.toml.
-        SCRUFF_DEFAULT_VERSION: 0.1.0
+        SCRUFF_DEFAULT_VERSION: 0.2.0
       run: |
         if [[ "$SCRUFF_VERSION" == "auto" ]]; then
           config="$GITHUB_WORKSPACE/.scruff.toml"
@@ -154,9 +158,18 @@ runs:
           echo "$PWD" >> "$GITHUB_PATH"
         fi
     - name: Run scruff
-      if: inputs.args != ''
+      if: inputs.format == 'true' || inputs.lint == 'true'
       shell: bash
       env:
-        SCRUFF_ARGS: ${{ inputs.args }}
-      # Unquoted on purpose: the args string is split into words.
-      run: scruff $SCRUFF_ARGS
+        SCRUFF_FORMAT: ${{ inputs.format }}
+        SCRUFF_LINT: ${{ inputs.lint }}
+      # Runs both before failing, so a format failure doesn't hide lint results.
+      run: |
+        status=0
+        if [[ "$SCRUFF_FORMAT" == "true" ]]; then
+          scruff format --check || status=1
+        fi
+        if [[ "$SCRUFF_LINT" == "true" ]]; then
+          scruff check || status=1
+        fi
+        exit $status

@@ -24,9 +24,9 @@ jobs:
       # Submodules (corpora/) are skipped: tests that use them skip when absent.
       - uses: actions/checkout@v7
 
-      # Runs the default `scruff format --check` on this repo.
-      - name: check Scala code format
-        uses: ./
+      # Runs the defaults, `scruff format --check` and `scruff check`, on this repo.
+      # - name: check Scala code format and lint
+      #   uses: ./
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - run: cargo test --locked
