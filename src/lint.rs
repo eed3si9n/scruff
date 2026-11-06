@@ -285,17 +285,7 @@ impl Selection {
     /// The rules selected, in [`Rule::ALL`]'s order, or the first entry no
     /// rule matches.
     pub fn rules(&self) -> Result<Vec<Rule>, String> {
-        let matching = |entries: &[String]| -> Result<Vec<Rule>, String> {
-            let mut rules = Vec::new();
-            for entry in entries {
-                let matched = Rule::matching(entry);
-                if matched.is_empty() {
-                    return Err(format!("no rule is named or coded {entry:?}"));
-                }
-                rules.extend(matched);
-            }
-            Ok(rules)
-        };
+        let matching = Rule::all_matching;
         let mut selected = match &self.select {
             Some(entries) => matching(entries)?,
             None => Rule::defaults(),
@@ -311,6 +301,20 @@ impl Selection {
 }
 
 impl Rule {
+    /// The rules entries of a [`Selection`] stand for, or an error naming
+    /// the first entry no rule matches.
+    pub fn all_matching(entries: &[String]) -> Result<Vec<Rule>, String> {
+        let mut rules = Vec::new();
+        for entry in entries {
+            let matched = Rule::matching(entry);
+            if matched.is_empty() {
+                return Err(format!("no rule is named or coded {entry:?}"));
+            }
+            rules.extend(matched);
+        }
+        Ok(rules)
+    }
+
     /// The rules an entry of a [`Selection`] stands for.
     fn matching(entry: &str) -> Vec<Rule> {
         Rule::ALL

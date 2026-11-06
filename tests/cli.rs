@@ -694,6 +694,82 @@ fn check_follows_select_and_ignore() {
 }
 
 #[test]
+fn select_on_the_command_line_replaces_the_configs() {
+    let source = "object A:\n  var x = 1\n  def f: Int = return x\n  val y = null\n";
+    let dir = repository(
+        "check_select_flag",
+        &[
+            ("A.scala", source),
+            (
+                ".scruff.toml",
+                "[lint]\nextend-select = [\"no_var\"]\nignore = [\"S001\"]\n",
+            ),
+        ],
+    );
+    let codes = |out: &Output| -> Vec<String> {
+        text(&out.stdout)
+            .lines()
+            .filter_map(|line| Some(line.split(' ').nth(1)?.to_string()))
+            .filter(|code| code.len() == 4)
+            .collect()
+    };
+    let concise = ["check", "--output-format", "concise"];
+    let out = scruff_in(&dir, &concise, "");
+    assert_eq!(codes(&out), ["S002", "S004"]);
+    // The config's ignore goes too, as in Ruff.
+    let out = scruff_in(
+        &dir,
+        &[&concise[..], &["--select", "S001,no_null"]].concat(),
+        "",
+    );
+    assert_eq!(out.status.code(), Some(1));
+    assert_eq!(codes(&out), ["S001", "S004"]);
+    let out = scruff_in(
+        &dir,
+        &[
+            &concise[..],
+            &["--select", "no_return", "--select", "S002", "-"],
+        ]
+        .concat(),
+        source,
+    );
+    assert_eq!(codes(&out), ["S002", "S001"]);
+    let out = scruff_in(&dir, &["check", "--select", "C"], "");
+    assert_eq!(out.status.code(), Some(0));
+    // `--ignore` turns rules off on top of the config's selection.
+    let out = scruff_in(&dir, &[&concise[..], &["--ignore", "no_var"]].concat(), "");
+    assert_eq!(codes(&out), ["S004"]);
+    // And on top of `--select`.
+    let out = scruff_in(
+        &dir,
+        &[&concise[..], &["--select", "S", "--ignore", "S002,S004"]].concat(),
+        "",
+    );
+    assert_eq!(codes(&out), ["S001"]);
+    let out = scruff_in(
+        &dir,
+        &[&concise[..], &["--ignore", "S002", "--ignore", "S004", "-"]].concat(),
+        source,
+    );
+    assert_eq!(out.status.code(), Some(0));
+    assert_eq!(codes(&out), Vec::<String>::new());
+}
+
+#[test]
+fn an_unknown_rule_in_select_or_ignore_exits_with_2() {
+    let dir = repository("check_select_unknown", &[("A.scala", "object A\n")]);
+    for (flag, entries) in [("--select", "no_var,S9"), ("--ignore", "S9")] {
+        let out = scruff_in(&dir, &["check", flag, entries], "");
+        assert_eq!(out.status.code(), Some(2));
+        assert!(
+            text(&out.stderr).contains(&format!(r#"{flag}: no rule is named or coded "S9""#)),
+            "{}",
+            text(&out.stderr)
+        );
+    }
+}
+
+#[test]
 fn an_unknown_rule_in_the_config_exits_with_2() {
     let dir = repository(
         "check_unknown_rule",

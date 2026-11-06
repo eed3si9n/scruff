@@ -10,6 +10,8 @@ Scruff linter (`check`) is a fast Scala linter. It checks the given files and di
 | ------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------- |
 | <nobr>`--output-format` _how_</nobr> | `full` (default) shows each problem with the lines around it; `concise` prints one line each, as `file:line:col: code rule message` |
 | `--fix`                              | fixes what the rules can, overwriting each file, and reports what's left; on `-`, prints the fixed text and reports to stderr      |
+| `--select` _rules_                   | runs these rules in place of what `[lint]` selects, `ignore` included; names, codes or starts of codes, separated by commas         |
+| `--ignore` _rules_                   | turns these rules off, on top of `--select` or what `[lint]` selects; separated by commas                                           |
 | `--color` _when_                     | `auto` (default), `always` or `never`; `auto` colors on a terminal unless `NO_COLOR` is set                                         |
 
 ### Micro benchmark
@@ -56,6 +58,14 @@ version = "0.2.2"
 extend-select = ["no_default_param"]
 
 ignore = ["no_null"]
+```
+
+To try other rules without editing the configuration, `--select` on the command line replaces what `[lint]` selects, as in Ruff. It takes the same entries, separated by commas, and the configuration's `ignore` doesn't apply. `--ignore` then turns rules off, on top of `--select` or of the configuration:
+
+```bash
+$ scruff check --select no_var,S004
+$ scruff check --select ALL --ignore S003,S006
+$ scruff check --ignore no_null
 ```
 
 ## Usage
@@ -112,6 +122,38 @@ Found 3 problems (2 fixed, 1 remaining).
 ```
 
 After each round of edits, scruff checks the result again, since one fix can make way for another. A round whose result doesn't parse is dropped. Problems turned off with `scruff: ignore` aren't fixed.
+
+### Migrating from sbt 0.13 syntax
+
+`sbt_0_13_syntax` isn't on by default, but `--select` can run it, and only it, without changing the configuration. `--fix` then rewrites `key in Scope` to the slash syntax that sbt 2 requires:
+
+```bash
+$ scruff check --select sbt_0_13_syntax --fix
+```
+
+Given this `build.sbt`:
+
+```scala
+lazy val core = project
+  .settings(
+    scalacOptions in Compile += "-deprecation",
+    scalacOptions in (Compile, console) := Nil,
+    fork in Test := true,
+  )
+```
+
+it writes:
+
+```scala
+lazy val core = project
+  .settings(
+    Compile / scalacOptions += "-deprecation",
+    Compile / console / scalacOptions := Nil,
+    Test / fork := true,
+  )
+```
+
+and prints `Found 3 problems (3 fixed, 0 remaining).`, exiting with 0. Any `.sbt`, `.scala` or `.sc` file it finds is checked, `project/*.scala` included. If one `in` follows another, as in `sources in Compile in core`, scruff can't tell the project from the configuration from the syntax alone. It reports the problem as remaining and exits with 1, so you can write `core / Compile / sources` yourself.
 
 ## Error suppression
 

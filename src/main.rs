@@ -82,7 +82,9 @@ enum Command {
     /// Runs the default rules, or those `[lint]` in `.scruff.toml` selects:
     /// `select` replaces the defaults, `extend-select` adds to them, and
     /// `ignore` turns rules off, each a list of rules' names or codes. The
-    /// rules are listed at the end.
+    /// rules are listed at the end. As in Ruff, `--select` replaces what
+    /// `[lint]` selects, `ignore` included, and `--ignore` turns rules off
+    /// on top of either.
     ///
     /// A comment `// scruff: ignore(S004)` or `// scruff: ignore(no_null)`
     /// turns rules off for its line, or for the next line when it's on a
@@ -111,6 +113,17 @@ enum Command {
         /// left
         #[arg(long)]
         fix: bool,
+
+        /// The rules to run in place of those the configuration selects,
+        /// separated by commas: rules' names, codes, starts of codes such
+        /// as `S`, or `ALL`
+        #[arg(long, value_name = "RULES", value_delimiter = ',')]
+        select: Option<Vec<String>>,
+
+        /// Rules to turn off, on top of `--select` or the configuration,
+        /// separated by commas
+        #[arg(long, value_name = "RULES", value_delimiter = ',')]
+        ignore: Vec<String>,
 
         /// When to color the output; `auto` colors it on a terminal, unless
         /// `NO_COLOR` is set
@@ -179,9 +192,13 @@ fn run(cli: Cli) -> ExitCode {
             files,
             output_format,
             fix,
+            select,
+            ignore,
             color,
         } => lint(
             files,
+            select,
+            ignore,
             Linting {
                 format: output_format,
                 fix,
@@ -881,18 +898,54 @@ fn rules_help() -> String {
 
 /// `scruff check`: each file against the lint rules, in parallel, reported
 /// in the order given.
-fn lint(files: Vec<PathBuf>, how: Linting, paints: Paints) -> ExitCode {
+/// `select`, from `--select`, stands in for each configuration's rules,
+/// and `ignore`, from `--ignore`, leaves rules out of them.
+fn lint(
+    files: Vec<PathBuf>,
+    select: Option<Vec<String>>,
+    ignore: Vec<String>,
+    how: Linting,
+    paints: Paints,
+) -> ExitCode {
     let error = |message: &str| eprint!("{}", paints.err.error(message));
     let stdin = |f: &PathBuf| f.as_os_str() == "-";
     if files.iter().any(stdin) && files.len() > 1 {
         error("`-` reads standard input, so it can't come with files");
         return ExitCode::from(2);
     }
+    let selected = match select.as_deref().map(lint::Rule::all_matching) {
+        Some(Ok(rules)) => Some(rules),
+        Some(Err(message)) => {
+            error(&format!("--select: {message}"));
+            return ExitCode::from(2);
+        }
+        None => None,
+    };
+    let ignored = match lint::Rule::all_matching(&ignore) {
+        Ok(rules) => rules,
+        Err(message) => {
+            error(&format!("--ignore: {message}"));
+            return ExitCode::from(2);
+        }
+    };
+    // The rules for a file under `config`, in `Rule::ALL`'s order.
+    let rules_for = |config: Option<&Config>| -> Vec<lint::Rule> {
+        let base = match (&selected, config) {
+            (Some(rules), _) => rules,
+            (None, Some(config)) => &config.lint_rules,
+            (None, None) => &lint::Rule::defaults(),
+        };
+        lint::Rule::ALL
+            .iter()
+            .copied()
+            .filter(|rule| base.contains(rule) && !ignored.contains(rule))
+            .collect()
+    };
 
     let mut code = 0;
     let outcomes: Vec<Linted> = if files.len() == 1 && stdin(&files[0]) {
         let rules = match Config::find(Path::new(".")) {
-            Ok(config) => config.map_or_else(lint::Rule::defaults, |c| c.lint_rules),
+            Ok(config) => rules_for(config.as_ref()),
             Err(message) => {
                 error(&message.to_string());
                 return ExitCode::from(2);
@@ -940,8 +993,10 @@ fn lint(files: Vec<PathBuf>, how: Linting, paints: Paints) -> ExitCode {
             .filter_map(|file| match configs.for_file(file) {
                 Some((_, Err(_))) => Some(Linted::failed(String::new())),
                 Some((_, Ok(config))) if !config.includes(file) => None,
-                Some((_, Ok(config))) => Some(lint_file(file, &config.lint_rules, how, paints)),
-                None => Some(lint_file(file, &lint::Rule::defaults(), how, paints)),
+                Some((_, Ok(config))) => {
+                    Some(lint_file(file, &rules_for(Some(config)), how, paints))
+                }
+                None => Some(lint_file(file, &rules_for(None), how, paints)),
             })
             .collect()
     };
