@@ -38,6 +38,9 @@
 //! chain mean nothing, as `(a && b)` as `a && b`: the tree holds the
 //! grouping, so a change of precedence is still a different shape. In
 //! Scala 2 they let a broken chain start its lines with the operators.
+//! Parentheses around a lambda's one typed parameter mean nothing:
+//! `{ (x: A) =>` as `{ x: A =>`, which a colon argument needs,
+//! `xs.map: (x: A) =>`.
 
 use std::fmt;
 
@@ -214,6 +217,47 @@ fn is_chain_parens(node: &SyntaxNode<'_>) -> bool {
     )
 }
 
+/// The parentheses around a lambda's one parameter with a type and nothing
+/// else, as `(x: A)` in `{ (x: A) =>` or `xs.map: (x: A) =>`, which mean
+/// the same as `{ x: A =>`: in both, the body is the rest of the block.
+fn is_lone_typed_binding(node: &SyntaxNode<'_>) -> bool {
+    if node.kind() != SyntaxKind::Bindings
+        || !node.parent().is_some_and(|p| {
+            matches!(
+                p.kind(),
+                SyntaxKind::LambdaExpression | SyntaxKind::ColonArgument
+            )
+        })
+    {
+        return false;
+    }
+    let mut children = node.non_trivia_children();
+    let binding = match (
+        children.next(),
+        children.next(),
+        children.next(),
+        children.next(),
+    ) {
+        (
+            Some(NodeOrToken::Token(open)),
+            Some(NodeOrToken::Node(binding)),
+            Some(NodeOrToken::Token(close)),
+            None,
+        ) if open.text() == "(" && close.text() == ")" && binding.kind() == SyntaxKind::Binding => {
+            binding
+        }
+        _ => return false,
+    };
+    let parts: Vec<_> = binding.non_trivia_children().collect();
+    matches!(
+        parts.as_slice(),
+        [name, NodeOrToken::Token(colon), ty]
+            if name.field_name() == Some("name")
+                && colon.text() == ":"
+                && ty.field_name() == Some("type")
+    )
+}
+
 /// The left part of an intersection type that is itself one, as `A & B` in
 /// `A & B & C`, which counts as part of the outer one: `A with B with C` is
 /// one compound type.
@@ -362,6 +406,14 @@ fn field(element: SyntaxElement<'_>) -> Option<&'static str> {
         // Parentheses around a chain may be inside another node that's
         // skipped, as a block around one expression.
         Some(parent) if is_chain_parens(&parent) => field(NodeOrToken::Node(parent)),
+        // A lone typed parameter's parts are the lambda's parameters, as
+        // they are without parentheses.
+        Some(parent)
+            if parent.kind() == SyntaxKind::Binding
+                && parent.parent().is_some_and(|p| is_lone_typed_binding(&p)) =>
+        {
+            Some("parameters")
+        }
         Some(parent)
             if is_condition_parens(&parent)
                 || is_transparent_block(&parent)
@@ -382,16 +434,28 @@ enum Step<'t> {
     Enter(SyntaxNode<'t>),
     Leave(SyntaxNode<'t>),
     Token(SyntaxToken<'t>),
+    /// The start of a lambda body that is its statements without a block
+    /// around them, at its first statement: see [`bare_lambda_body`].
+    BodyStart(SyntaxElement<'t>),
+    /// Its end, at its last statement.
+    BodyEnd(SyntaxElement<'t>),
 }
 
 impl Step<'_> {
     fn same_as(&self, other: &Step<'_>) -> bool {
+        // A bare lambda body is an indented block.
+        let block = |node: &SyntaxNode<'_>| node_kind(node) == SyntaxKind::IndentedBlock;
         match (self, other) {
             (Step::Enter(a), Step::Enter(b)) => {
                 node_kind(a) == node_kind(b)
                     && field(NodeOrToken::Node(*a)) == field(NodeOrToken::Node(*b))
             }
             (Step::Leave(a), Step::Leave(b)) => node_kind(a) == node_kind(b),
+            (Step::BodyStart(_), Step::BodyStart(_)) | (Step::BodyEnd(_), Step::BodyEnd(_)) => true,
+            (Step::BodyStart(_), Step::Enter(n)) | (Step::Enter(n), Step::BodyStart(_)) => {
+                block(n) && field(NodeOrToken::Node(*n)).is_none()
+            }
+            (Step::BodyEnd(_), Step::Leave(n)) | (Step::Leave(n), Step::BodyEnd(_)) => block(n),
             (Step::Token(a), Step::Token(b)) => {
                 new_token(a) == new_token(b)
                     && a.is_missing() == b.is_missing()
@@ -406,6 +470,8 @@ impl Step<'_> {
             Step::Enter(node) => node.text_range().start(),
             Step::Leave(node) => node.text_range().end(),
             Step::Token(token) => token.text_range().start(),
+            Step::BodyStart(first) => first.text_range().start(),
+            Step::BodyEnd(last) => last.text_range().end(),
         }
     }
 
@@ -424,12 +490,73 @@ impl Step<'_> {
                 )
             }
             Step::Token(token) => format!("{}{:?}", field(token.field_name()), token.text()),
+            Step::BodyStart(_) => "indented_block".to_string(),
+            Step::BodyEnd(_) => "end of indented_block".to_string(),
         }
     }
 }
 
+/// The first and last statements of a lambda body that has no block around
+/// it, where tree-sitter-scala would read the same body with a block: a
+/// typed lambda in braces, `{ x: A =>`, holds its statements itself, but
+/// as `xs.map: (x: A) =>` they're an indented block. Not for one
+/// expression, whose block [`is_transparent_block`] skips.
+fn bare_lambda_body<'t>(lambda: &SyntaxNode<'t>) -> Option<(SyntaxElement<'t>, SyntaxElement<'t>)> {
+    if lambda.kind() != SyntaxKind::LambdaExpression {
+        return None;
+    }
+    let body: Vec<_> = lambda
+        .non_trivia_children()
+        .skip_while(
+            |c| !matches!(c, NodeOrToken::Token(t) if matches!(t.text(), "=>" | "\u{21D2}")),
+        )
+        .skip(1)
+        .filter(|c| c.kind().is_named())
+        .collect();
+    match body.as_slice() {
+        [] => None,
+        [only] => {
+            let name = only.kind().name();
+            (name.ends_with("_definition") || name.ends_with("_declaration"))
+                .then_some((*only, *only))
+        }
+        [first, .., last] => Some((*first, *last)),
+    }
+}
+
 fn code_steps(root: SyntaxNode<'_>) -> impl Iterator<Item = Step<'_>> {
-    root.preorder_with_tokens().filter_map(|event| match event {
+    // Where a bare lambda body starts or ends, its steps around the
+    // statement's own.
+    let bare = |element: SyntaxElement<'_>| {
+        let (first, last) = element
+            .parent()
+            .filter(|p| p.kind() == SyntaxKind::LambdaExpression)
+            .and_then(|p| bare_lambda_body(&p))
+            .map_or((false, false), |(first, last)| {
+                (first == element, last == element)
+            });
+        (first, last)
+    };
+    root.preorder_with_tokens().flat_map(move |event| {
+        let (before, after) = match event {
+            WalkEvent::Enter(element) if !element.is_trivia() => {
+                let (first, last) = bare(element);
+                (
+                    first.then_some(Step::BodyStart(element)),
+                    (last && element.as_token().is_some()).then_some(Step::BodyEnd(element)),
+                )
+            }
+            WalkEvent::Leave(element @ NodeOrToken::Node(_)) => {
+                (None, bare(element).1.then_some(Step::BodyEnd(element)))
+            }
+            _ => (None, None),
+        };
+        before.into_iter().chain(step(event)).chain(after)
+    })
+}
+
+fn step(event: WalkEvent<SyntaxElement<'_>>) -> Option<Step<'_>> {
+    match event {
         WalkEvent::Enter(element) | WalkEvent::Leave(element) if element.is_trivia() => None,
         WalkEvent::Enter(NodeOrToken::Node(node)) | WalkEvent::Leave(NodeOrToken::Node(node))
             if is_transparent_block(&node)
@@ -443,6 +570,9 @@ fn code_steps(root: SyntaxNode<'_>) -> impl Iterator<Item = Step<'_>> {
                 || is_nested_and_type(&node)
                 || is_pattern_type_parens(&node)
                 || is_chain_parens(&node)
+                || is_lone_typed_binding(&node)
+                || node.kind() == SyntaxKind::Binding
+                    && node.parent().is_some_and(|p| is_lone_typed_binding(&p))
                 || is_optional_end_marker(&node) =>
         {
             None
@@ -452,7 +582,7 @@ fn code_steps(root: SyntaxNode<'_>) -> impl Iterator<Item = Step<'_>> {
         WalkEvent::Leave(NodeOrToken::Node(node)) => Some(Step::Leave(node)),
         WalkEvent::Enter(NodeOrToken::Token(token)) => Some(Step::Token(token)),
         WalkEvent::Leave(NodeOrToken::Token(_)) => None,
-    })
+    }
 }
 
 /// A token that means nothing, so it may come or go: a trailing comma,
@@ -464,9 +594,9 @@ fn may_come_or_go(token: &SyntaxToken<'_>) -> bool {
         || is_lone_rename_brace(token)
         || is_old_splice_token(token)
         || (matches!(token.text(), "(" | ")")
-            && token
-                .parent()
-                .is_some_and(|p| is_pattern_type_parens(&p) || is_chain_parens(&p)))
+            && token.parent().is_some_and(|p| {
+                is_pattern_type_parens(&p) || is_chain_parens(&p) || is_lone_typed_binding(&p)
+            }))
         || is_control_token(token)
         || is_optional_brace(token)
         || (token.text() == ":"
@@ -1090,6 +1220,42 @@ mod tests {
         }
         differs("xs.map { x =>\n  a\n  b\n}\n", "xs.map: y =>\n  a\n  b\n");
         differs("xs.foreach {\n  a\n  b\n}\n", "xs.foreach:\n  a\nb\n");
+    }
+
+    #[test]
+    fn a_lone_typed_parameter_means_the_same_in_parentheses() {
+        for (bare, parens) in [
+            // A colon argument needs them.
+            (
+                "xs.map { x: A =>\n  a\n  b\n}\n",
+                "xs.map: (x: A) =>\n  a\n  b\n",
+            ),
+            ("xs.map { x: A =>\n  a\n}\n", "xs.map: (x: A) =>\n  a\n"),
+            (
+                "xs.map { x: A =>\n  val a = 1\n}\n",
+                "xs.map: (x: A) =>\n  val a = 1\n",
+            ),
+            ("xs.map { x: M.N => a }\n", "xs.map { (x: M.N) => a }\n"),
+            (
+                "xs.map { x: A =>\n  a\n  b\n}\n",
+                "xs.map { (x: A) =>\n  a\n  b\n}\n",
+            ),
+        ] {
+            assert_eq!(check_equivalent(bare, parens), Ok(()), "{bare}");
+            assert_eq!(check_equivalent(parens, bare), Ok(()), "{parens}");
+        }
+        // A different name, type or body still differs.
+        differs("xs.map { x: A =>\n  a\n}\n", "xs.map: (y: A) =>\n  a\n");
+        differs("xs.map { x: A =>\n  a\n}\n", "xs.map: (x: B) =>\n  a\n");
+        differs(
+            "xs.map { x: A =>\n  a\n  b\n}\n",
+            "xs.map: (x: A) =>\n  a\nb\n",
+        );
+        // More than one parameter isn't one parameter.
+        differs(
+            "xs.map { (x: A, y: B) =>\n  a\n}\n",
+            "xs.map: (x: A) =>\n  a\n",
+        );
     }
 
     #[test]

@@ -105,6 +105,7 @@ val h = { x: Int => y: Int =>
 
 <<< a typed lambda body getting shallower is indented from its arrow
 # From tree-sitter-scala's corpus (#705), which reads this since 0.26.5.
+dialect = scala213
 ===
 val f = _.next { x: M.N =>
     val a = 1

@@ -27,6 +27,28 @@ xs.foreach:
 val c = xs.collect:
   case Some(x) => x
 
+<<< a typed parameter gets the parentheses a colon argument needs
+val a = xs.map { x: Int =>
+  val y = x + 1
+  y * 2
+}
+val b = xs.map { x: Int => x + 1 }
+// From tree-sitter-scala's corpus (#705).
+val f = _.next { x: M.N =>
+    val a = 1
+  val b = 2
+}
+>>>
+val a = xs.map: (x: Int) =>
+  val y = x + 1
+  y * 2
+val b = xs.map: (x: Int) =>
+  x + 1
+// From tree-sitter-scala's corpus (#705).
+val f = _.next: (x: M.N) =>
+  val a = 1
+  val b = 2
+
 <<< in a chain, and after other arguments
 val a = xs
   .filter(p)

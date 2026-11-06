@@ -894,8 +894,9 @@ pub(super) fn braces(tree: &Tree, node: SyntaxNode<'_>) -> Option<Vec<(TextRange
 /// The edits that make a call's braced argument a colon argument, as
 /// SIP-44 allows: `xs.map { x =>` to `xs.map: x =>`, `xs.foreach {` to
 /// `xs.foreach:` and `xs.collect {` with `case` clauses to `xs.collect:`.
-/// Only where the lambda's parameters are a name, `_` or in parentheses,
-/// and what follows the `}` on its line is nothing, closing brackets, or a
+/// Only where the lambda's parameters are a name, `_`, one name with a
+/// type, which gets parentheses, `{ x: A =>` to `: (x: A) =>`, or in
+/// parentheses, and what follows the `}` on its line is nothing, closing brackets, or a
 /// `.` and what it selects.
 ///
 /// Over several lines, `{` or the lambda's `=>` ends its line, every line
@@ -940,6 +941,9 @@ pub(super) fn fewer_braces(tree: &Tree, call: SyntaxNode<'_>) -> Option<Vec<Edit
         .non_trivia_children()
         .filter(|c| c.kind().is_named())
         .collect();
+    // A typed parameter without parentheses, `{ x: A =>`, gets them, which
+    // a colon argument needs: `: (x: A) =>`.
+    let mut parens = Vec::new();
     let line_end = match statements.as_slice() {
         [NodeOrToken::Node(lambda)] if lambda.kind() == SyntaxKind::LambdaExpression => {
             let parameters = lambda.child_by_field_name("parameters")?;
@@ -949,6 +953,25 @@ pub(super) fn fewer_braces(tree: &Tree, call: SyntaxNode<'_>) -> Option<Vec<Edit
             ) || breaks(open.text_range().end(), parameters.text_range().start())
             {
                 return None;
+            }
+            let parts: Vec<_> = lambda
+                .non_trivia_children()
+                .filter(|c| c.field_name() == Some("parameters"))
+                .collect();
+            match parts.as_slice() {
+                [_] => {}
+                [_, NodeOrToken::Token(colon), ty] if colon.text() == ":" => {
+                    let end = match ty {
+                        NodeOrToken::Node(n) => n.last_code_token()?.text_range().end(),
+                        NodeOrToken::Token(t) => t.text_range().end(),
+                    };
+                    parens.push((
+                        TextRange::empty(parameters.text_range().start()),
+                        "(".into(),
+                    ));
+                    parens.push((TextRange::empty(end), ")".into()));
+                }
+                _ => return None,
             }
             lambda
                 .children_with_tokens()
@@ -1033,6 +1056,7 @@ pub(super) fn fewer_braces(tree: &Tree, call: SyntaxNode<'_>) -> Option<Vec<Edit
                 String::new(),
             )),
         }
+        edits.extend(parens);
         return Some(edits);
     }
     if !breaks(line_end.text_range().end(), first.text_range().start())
@@ -1094,7 +1118,9 @@ pub(super) fn fewer_braces(tree: &Tree, call: SyntaxNode<'_>) -> Option<Vec<Edit
             )
         }
     };
-    Some(vec![colon, (close_edit, String::new())])
+    let mut edits = vec![colon, (close_edit, String::new())];
+    edits.extend(parens);
+    Some(edits)
 }
 
 /// The width of the line a call's argument lists start on, from a token
@@ -1965,6 +1991,21 @@ mod tests {
             assert_eq!(rewritten(braced, fewer), colon, "{braced}");
             assert_eq!(rewritten(colon, OLD), braced, "{colon}");
         }
+        // A typed parameter gets parentheses, which stay in braces.
+        for (braced, colon) in [
+            ("xs.map { x: Int =>\n  a\n}\n", "xs.map: (x: Int) =>\n  a\n"),
+            (
+                "xs.map { x: M.N =>\n  a\n  b\n}\n",
+                "xs.map: (x: M.N) =>\n  a\n  b\n",
+            ),
+            ("xs.map { x: Int => a }\n", "xs.map: (x: Int) =>\n  a\n"),
+        ] {
+            assert_eq!(rewritten(braced, fewer), colon, "{braced}");
+        }
+        assert_eq!(
+            rewritten("xs.map: (x: Int) =>\n  a\n", OLD),
+            "xs.map { (x: Int) =>\n  a\n}\n"
+        );
         // On one line, the body goes on the next.
         for (braced, colon) in [
             ("val a = xs.map { x => a }\n", "val a = xs.map: x =>\n  a\n"),
@@ -1995,8 +2036,6 @@ mod tests {
             "xs.map { x => /* c */ a }\n",
             // The body starting on the `=>` line.
             "xs.map { x => a\n  b\n}\n",
-            // A typed parameter without parentheses.
-            "xs.map { x: Int =>\n  a\n}\n",
             // An operator before the `{`.
             "xs ++ {\n  a\n}\n",
             // Not deeper than the `}`.
