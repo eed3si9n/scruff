@@ -12,7 +12,9 @@
 //! placed from its opener's new position.
 //!
 //! A container whose statements aren't each on their own line at one
-//! indentation moves with the container around it instead. Files with tabs
+//! indentation moves with the container around it instead, unless it's in
+//! braces and no statement is deeper than the one before it: then each run
+//! of statements at one width moves to where they all belong. Files with tabs
 //! in their indentation, or with code that is copied verbatim for its
 //! indentation (`format: off`, syntax errors, unsafe regions), keep theirs.
 //!
@@ -162,6 +164,22 @@ struct Container<'t> {
     opener: Option<SyntaxToken<'t>>,
     /// Scala 3 `case` clauses, which may sit at the width of their `match`.
     cases: bool,
+    /// Whether its statements are in braces, where their indentation doesn't
+    /// change what they mean.
+    braced: bool,
+    /// For one of the runs a container in braces is split into, by its
+    /// statements' widths: see [`width_runs`].
+    piece: Option<Piece>,
+}
+
+/// One of the runs of a container split by its statements' widths, which
+/// are placed together or not at all.
+#[derive(Clone, Copy)]
+struct Piece {
+    /// Which split container it's from.
+    group: usize,
+    /// Whether it's the last run, which ends where the container does.
+    last: bool,
 }
 
 /// A line that starts with code or a comment.
@@ -247,14 +265,30 @@ fn compute(tree: &Tree, relaid: &Relaid) -> Option<Layout> {
         statements: tree.syntax().non_trivia_children().collect(),
         opener: None,
         cases: false,
+        braced: false,
+        piece: None,
     }];
+    let mut groups = 0;
     for node in tree.syntax().descendants() {
-        if let Some(container) = container(node, &continued) {
-            containers.push(container);
+        let Some(container) = container(node, &continued) else {
+            continue;
+        };
+        match width_runs(&container) {
+            Some(runs) => {
+                containers.extend(pieces(&container, runs, groups));
+                groups += 1;
+            }
+            None => containers.push(container),
         }
     }
     // Outer containers first, so each one's opener line is placed before it.
     containers.sort_by_key(|c| (c.inner.start(), std::cmp::Reverse(c.inner.end())));
+    let mut members: Vec<Vec<usize>> = vec![Vec::new(); groups];
+    for (index, container) in containers.iter().enumerate() {
+        if let Some(piece) = container.piece {
+            members[piece.group].push(index);
+        }
+    }
 
     let mut parent = vec![0; containers.len()];
     let mut stack: Vec<usize> = Vec::new();
@@ -303,6 +337,8 @@ fn compute(tree: &Tree, relaid: &Relaid) -> Option<Layout> {
     // For a placed container: whether its statements go a step deeper than
     // its opener's line.
     let mut deeper = vec![false; containers.len()];
+    // Whether each split container's runs are placed.
+    let mut groups_placed: Vec<Option<bool>> = vec![None; groups];
     for (index, container) in containers.iter().enumerate() {
         let inherited = if index == 0 { 0 } else { shift[parent[index]] };
         shift[index] = inherited;
@@ -336,24 +372,39 @@ fn compute(tree: &Tree, relaid: &Relaid) -> Option<Layout> {
                 width as usize + step
             }
         };
-        let candidate = target as isize - indent as isize;
-        // Every line of the container must stay at column 0 or deeper.
-        // Comment lines don't count: they're placed with the statements.
-        let fits = owned[index]
-            .iter()
-            .map(|&line| &lines[line])
-            .filter(|l| !l.comment)
-            .all(|l| l.width >= floor && l.width as isize + candidate >= 0);
-        // A line right after the container that was shallower than its
-        // statements stays shallower: in `xs.map: x =>`, the body, then
-        // `.filter(p)` between the two, a body moved to the `.filter` width
-        // would take it in.
-        let next = lines.partition_point(|l| l.first < container.inner.end());
-        let keeps_next = lines.get(next).is_none_or(|l| {
-            l.comment || l.width >= indent || l.width as isize + inherited < target as isize
-        });
-        if fits && keeps_next {
-            shift[index] = candidate;
+        let accepts = |index: usize, indent: usize| {
+            let container = &containers[index];
+            let candidate = target as isize - indent as isize;
+            // Every line of the container must stay at column 0 or deeper.
+            // Comment lines don't count: they're placed with the statements.
+            let fits = owned[index]
+                .iter()
+                .map(|&line| &lines[line])
+                .filter(|l| !l.comment)
+                .all(|l| l.width >= floor && l.width as isize + candidate >= 0);
+            // A line right after the container that was shallower than its
+            // statements stays shallower: in `xs.map: x =>`, the body, then
+            // `.filter(p)` between the two, a body moved to the `.filter`
+            // width would take it in. After a run that isn't the last, that
+            // line is the next run's, placed with it.
+            let next = lines.partition_point(|l| l.first < container.inner.end());
+            let keeps_next = container.piece.is_some_and(|p| !p.last)
+                || lines.get(next).is_none_or(|l| {
+                    l.comment || l.width >= indent || l.width as isize + inherited < target as isize
+                });
+            fits && keeps_next
+        };
+        let accepted = match container.piece {
+            None => accepts(index, indent),
+            // A split container's runs share its opener, so its target.
+            Some(piece) => *groups_placed[piece.group].get_or_insert_with(|| {
+                members[piece.group]
+                    .iter()
+                    .all(|&m| statement_indent(&containers[m]).is_some_and(|i| accepts(m, i)))
+            }),
+        };
+        if accepted {
+            shift[index] = target as isize - indent as isize;
             placed[index] = Some((indent, target));
         }
     }
@@ -429,15 +480,16 @@ fn compute(tree: &Tree, relaid: &Relaid) -> Option<Layout> {
                 container: None,
             });
         }
-        // Its statements, from their indentation.
+        // Its statements, from their indentation. A split container's runs
+        // are its statements together.
         let node = container.node;
-        nested.insert(
-            (node.kind(), node.text_range()),
-            Nested {
+        nested
+            .entry((node.kind(), node.text_range()))
+            .and_modify(|n: &mut Nested| n.inner = n.inner.cover(container.inner))
+            .or_insert(Nested {
                 inner: container.inner,
                 deeper: deeper[index],
-            },
-        );
+            });
         spans.push(Span {
             range: container.inner,
             from: indent,
@@ -493,8 +545,14 @@ fn container<'t>(node: SyntaxNode<'t>, continued: &[TextSize]) -> Option<Contain
         && node
             .parent()
             .is_some_and(|p| p.kind() == SyntaxKind::LambdaExpression);
-    if node.is_indentation_region() || lambda_body {
-        let statements: Vec<_> = if lambda_body {
+    // A typed lambda in braces, `{ x: A =>`, holds its statements itself,
+    // with no block around them: the lambda is their container.
+    let typed_lambda_body = braced_lambda_statements(node);
+    let typed_lambda = typed_lambda_body.is_some();
+    if node.is_indentation_region() || lambda_body || typed_lambda {
+        let statements: Vec<_> = if let Some(statements) = typed_lambda_body {
+            statements
+        } else if lambda_body {
             node.non_trivia_children()
                 .filter(|c| c.kind().is_named() && c.kind() != SyntaxKind::EndMarker)
                 .collect()
@@ -523,6 +581,7 @@ fn container<'t>(node: SyntaxNode<'t>, continued: &[TextSize]) -> Option<Contain
             },
         };
         let inner = TextRange::new(opener.text_range().end(), last.text_range().end());
+        let braced = typed_lambda || (lambda_body && !node.is_indentation_region());
         return Some(Container {
             node,
             frame: (start.text_range().start() < inner.start()).then_some(frame),
@@ -530,6 +589,8 @@ fn container<'t>(node: SyntaxNode<'t>, continued: &[TextSize]) -> Option<Contain
             statements,
             opener: Some(start),
             cases: node.kind() == SyntaxKind::IndentedCases,
+            braced,
+            piece: None,
         });
     }
     let mut children: Vec<_> = node.non_trivia_children().collect();
@@ -572,7 +633,121 @@ fn container<'t>(node: SyntaxNode<'t>, continued: &[TextSize]) -> Option<Contain
         statements,
         opener: Some(start),
         cases: false,
+        braced: true,
+        piece: None,
     })
+}
+
+/// For a container in braces whose statements don't share a width, its
+/// statements in runs at one width, if each starts its own line (or follows
+/// a `;` on the line before it) and none is deeper than the one before it.
+/// In braces a statement's width doesn't change what it means, and one no
+/// deeper than the statement before it can't be that statement's
+/// continuation misread by tree-sitter-scala, so the runs can be placed
+/// together. `None` for any other container.
+fn width_runs<'t>(container: &Container<'t>) -> Option<Vec<Vec<SyntaxElement<'t>>>> {
+    if !container.braced || statement_indent(container).is_some() {
+        return None;
+    }
+    let mut runs: Vec<(usize, Vec<SyntaxElement<'t>>)> = Vec::new();
+    for statement in &container.statements {
+        let first = first_token(statement)?;
+        // As in `statement_indent`.
+        if first.text() == "end" {
+            return None;
+        }
+        if !first.is_first_on_line() {
+            let after_semicolon =
+                std::iter::successors(first.prev_token(), SyntaxToken::prev_token)
+                    .find(SyntaxToken::owns_trivia)
+                    .is_some_and(|t| t.text() == ";");
+            if !after_semicolon {
+                return None;
+            }
+            runs.last_mut()?.1.push(*statement);
+            continue;
+        }
+        let width = first.indentation().len();
+        match runs.last_mut() {
+            Some((at, run)) if *at == width => run.push(*statement),
+            Some((at, _)) if *at < width => return None,
+            _ => runs.push((width, vec![*statement])),
+        }
+    }
+    (runs.len() > 1).then(|| runs.into_iter().map(|(_, run)| run).collect())
+}
+
+/// The container split into one container for each run of its statements:
+/// each from the end of the run before it, the last to where the container
+/// ends, so comments go with the statements after them.
+fn pieces<'t>(
+    container: &Container<'t>,
+    runs: Vec<Vec<SyntaxElement<'t>>>,
+    group: usize,
+) -> Vec<Container<'t>> {
+    let count = runs.len();
+    let mut start = container.inner.start();
+    runs.into_iter()
+        .enumerate()
+        .map(|(i, statements)| {
+            let last = i + 1 == count;
+            let end = match statements.last() {
+                _ if last => container.inner.end(),
+                Some(NodeOrToken::Node(node)) => node
+                    .last_code_token()
+                    .map_or(node.text_range().end(), |t| t.text_range().end()),
+                Some(NodeOrToken::Token(token)) => token.text_range().end(),
+                None => start,
+            };
+            let inner = TextRange::new(start, end);
+            start = end;
+            Container {
+                node: container.node,
+                frame: container.frame,
+                inner,
+                statements,
+                opener: container.opener,
+                cases: container.cases,
+                braced: true,
+                piece: Some(Piece { group, last }),
+            }
+        })
+        .collect()
+}
+
+/// The statements after the arrow of a lambda in braces, or nested in one
+/// as `{ x: A => y: B =>`, when they aren't in an indented block. `None`
+/// for any other node, or a lambda without statements of its own.
+fn braced_lambda_statements(node: SyntaxNode<'_>) -> Option<Vec<SyntaxElement<'_>>> {
+    if node.kind() != SyntaxKind::LambdaExpression {
+        return None;
+    }
+    let braced = std::iter::successors(node.parent(), SyntaxNode::parent)
+        .find(|p| p.kind() != SyntaxKind::LambdaExpression)
+        .is_some_and(|p| p.kind() == SyntaxKind::Block);
+    if !braced {
+        return None;
+    }
+    let statements: Vec<_> = node
+        .non_trivia_children()
+        .skip_while(
+            |c| !matches!(c, NodeOrToken::Token(t) if matches!(t.text(), "=>" | "\u{21D2}")),
+        )
+        .skip(1)
+        .filter(|c| c.kind().is_named())
+        .collect();
+    match statements.as_slice() {
+        [] => None,
+        [NodeOrToken::Node(n)]
+            if matches!(
+                n.kind(),
+                SyntaxKind::IndentedBlock | SyntaxKind::LambdaExpression
+            ) =>
+        {
+            None
+        }
+        _ => Some(statements),
+    }
 }
 
 /// The lines that print on the line before them unless a rule breaks them

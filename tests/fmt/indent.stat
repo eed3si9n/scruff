@@ -73,6 +73,98 @@ object A {
     }
 }
 
+<<< a typed lambda body in braces is indented from the line with its arrow
+dialect = scala213
+===
+object A {
+  val ys = xs
+    .map { x: Int =>
+          val y = x + 1
+          y * 2
+    }
+}
+>>>
+object A {
+  val ys = xs
+    .map { x: Int =>
+      val y = x + 1
+      y * 2
+    }
+}
+
+<<< nested typed lambdas in braces indent the body from the arrows' line
+val h = { x: Int => y: Int =>
+      val z = x + y
+      z
+}
+>>>
+val h = { x: Int => y: Int =>
+  val z = x + y
+  z
+}
+
+<<< a typed lambda body getting shallower is indented from its arrow
+# From tree-sitter-scala's corpus (#705), which reads this since 0.26.5.
+===
+val f = _.next { x: M.N =>
+    val a = 1
+  val b = 2
+}
+>>>
+val f = _.next { x: M.N =>
+  val a = 1
+  val b = 2
+}
+
+<<< statements in braces getting shallower move to one width, comments with them
+dialect = scala213
+===
+def f = {
+      val a = 1
+    // b
+    val b = 2
+  b
+}
+>>>
+def f = {
+  val a = 1
+  // b
+  val b = 2
+  b
+}
+
+<<< members in braces getting shallower move to one width
+dialect = scala213
+===
+object A {
+      def f = xs.map { x =>
+          val y = x + 1
+          y * 2
+      }
+  def g = 1
+}
+>>>
+object A {
+  def f = xs.map { x =>
+    val y = x + 1
+    y * 2
+  }
+  def g = 1
+}
+
+<<< a statement deeper than the one before it keeps the layout in braces
+dialect = scala213
+===
+def f = {
+    a
+      b
+}
+>>>
+def f = {
+    a
+      b
+}
+
 <<< cases are indented from the start of their match
 object A:
   def f(c: Boolean) =
