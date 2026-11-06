@@ -1,8 +1,8 @@
 //! A project's configuration: which files to format, and the line width.
 //!
-//! scruff uses the nearest `.scruff.toml` or `.scalafmt.conf` in a file's
-//! directory or one above it, `.scruff.toml` first when a directory has
-//! both. Only that one file counts.
+//! scruff uses the nearest `.scruff.toml` in a file's directory or one
+//! above it, or else the nearest `.scalafmt.conf`, so a `.scruff.toml`
+//! wins over a nearer `.scalafmt.conf`. Only that one file counts.
 //!
 //! `.scruff.toml` has these keys:
 //!
@@ -522,27 +522,39 @@ pub struct Locator {
 }
 
 impl Locator {
-    /// The nearest `.scruff.toml` or `.scalafmt.conf` in `dir` or a
-    /// directory above it.
+    /// The nearest `.scruff.toml` in `dir` or a directory above it, or
+    /// else the nearest `.scalafmt.conf`. A `.scruff.toml` above wins over
+    /// a nearer `.scalafmt.conf`, such as one in a checked-out project.
     pub fn locate(&mut self, dir: &Path) -> Option<PathBuf> {
         let dir = std::path::absolute(dir).unwrap_or_else(|_| dir.to_path_buf());
         let mut visited = Vec::new();
-        let mut result = None;
+        let mut scruff = None;
+        let mut scalafmt = None;
+        let mut known = None;
         for dir in dir.ancestors() {
-            if let Some(known) = self.found.get(dir) {
-                result = known.clone();
+            if let Some(found) = self.found.get(dir) {
+                known = found.clone();
                 break;
             }
             visited.push(dir.to_path_buf());
-            if let Some(path) = [SCRUFF_FILE, SCALAFMT_FILE]
-                .map(|name| dir.join(name))
-                .into_iter()
-                .find(|path| path.is_file())
-            {
-                result = Some(path);
+            let path = dir.join(SCRUFF_FILE);
+            if path.is_file() {
+                scruff = Some(path);
                 break;
             }
+            let path = dir.join(SCALAFMT_FILE);
+            if scalafmt.is_none() && path.is_file() {
+                scalafmt = Some(path);
+            }
         }
+        // What a directory above found is a `.scalafmt.conf` only when
+        // there's no `.scruff.toml` above it.
+        let known_is_scruff = known.as_ref().is_some_and(|p| p.ends_with(SCRUFF_FILE));
+        let result = match (scruff, known) {
+            (Some(path), _) => Some(path),
+            (None, Some(path)) if known_is_scruff => Some(path),
+            (None, known) => scalafmt.or(known),
+        };
         for dir in visited {
             self.found.insert(dir, result.clone());
         }
@@ -880,19 +892,25 @@ mod tests {
         let found = Config::find(&sub).unwrap().unwrap();
         assert_eq!(found.path, dir.join(SCRUFF_FILE));
         assert_eq!(found.max_column, 100);
-        // A nearer `.scalafmt.conf` still wins over a farther `.scruff.toml`.
+        // A farther `.scruff.toml` wins over a nearer `.scalafmt.conf`.
         std::fs::write(sub.join(SCALAFMT_FILE), "maxColumn = 60").unwrap();
-        assert_eq!(Config::find(&sub).unwrap().unwrap().max_column, 60);
+        assert_eq!(Config::find(&sub).unwrap().unwrap().max_column, 100);
         // A locator shared between directories finds the same files.
         let deeper = sub.join("a/b");
         std::fs::create_dir_all(&deeper).unwrap();
         let mut locator = Locator::default();
-        assert_eq!(locator.locate(&deeper), Some(sub.join(SCALAFMT_FILE)));
-        assert_eq!(
-            locator.locate(&sub.join("a")),
-            Some(sub.join(SCALAFMT_FILE))
-        );
+        assert_eq!(locator.locate(&deeper), Some(dir.join(SCRUFF_FILE)));
+        assert_eq!(locator.locate(&sub.join("a")), Some(dir.join(SCRUFF_FILE)));
         assert_eq!(locator.locate(&dir), Some(dir.join(SCRUFF_FILE)));
+        // The same, looking at the top directory first.
+        let mut locator = Locator::default();
+        assert_eq!(locator.locate(&dir), Some(dir.join(SCRUFF_FILE)));
+        assert_eq!(locator.locate(&deeper), Some(dir.join(SCRUFF_FILE)));
+        // With no `.scruff.toml`, the nearest `.scalafmt.conf`.
+        std::fs::remove_file(dir.join(SCRUFF_FILE)).unwrap();
+        let mut locator = Locator::default();
+        assert_eq!(locator.locate(&dir), Some(dir.join(SCALAFMT_FILE)));
+        assert_eq!(locator.locate(&deeper), Some(sub.join(SCALAFMT_FILE)));
         std::fs::remove_dir_all(&dir).unwrap();
     }
 

@@ -18,9 +18,12 @@ fn scruff(args: &[&str], stdin: &str) -> Output {
     scruff_in(Path::new(env!("CARGO_TARGET_TMPDIR")), args, stdin)
 }
 
-/// A new, empty directory for a test's project.
+/// A new, empty directory for a test's project, outside this repository,
+/// whose `.scruff.toml` would win over the project's `.scalafmt.conf`.
 fn project(name: &str) -> PathBuf {
-    let dir = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join(name);
+    let dir = std::env::temp_dir()
+        .join(format!("scruff-cli-{}", std::process::id()))
+        .join(name);
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
     dir
@@ -428,6 +431,23 @@ fn a_walk_follows_the_config_and_skips_excluded_directories() {
     );
     let out = scruff_in(&dir, &["format", "--check", "."], "");
     assert_eq!(reformatted(&out), ["A.scala", "notes.txt"]);
+}
+
+#[test]
+fn a_walk_skips_an_excluded_directory_with_its_own_config() {
+    let dir = repository(
+        "walk_nested_config",
+        &[
+            (".scruff.toml", "exclude-paths = [\"glob:**/io/**\"]\n"),
+            ("A.scala", UNFORMATTED),
+            ("io/.scalafmt.conf", "maxColumn = 100\n"),
+            ("io/B.scala", "object B { val b = null }\n"),
+        ],
+    );
+    let out = scruff_in(&dir, &["format", "--check", "."], "");
+    assert_eq!(reformatted(&out), ["A.scala"]);
+    let out = scruff_in(&dir, &["check", "."], "");
+    assert!(!text(&out.stdout).contains("io/"), "{}", text(&out.stdout));
 }
 
 #[test]

@@ -28,8 +28,8 @@ enum Command {
     /// A directory stands for the files in it and below it, except hidden
     /// ones and what `.gitignore` leaves out.
     ///
-    /// Each file follows the nearest `.scruff.toml` or `.scalafmt.conf` in
-    /// its directory or above, `.scruff.toml` first: files its exclude paths
+    /// Each file follows the nearest `.scruff.toml` in its directory or
+    /// above, or else the nearest `.scalafmt.conf`: files its exclude paths
     /// leave out are skipped, and lines are kept within its maximum column.
     ///
     /// Ends with a count of the files changed and left unchanged.
