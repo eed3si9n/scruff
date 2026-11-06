@@ -88,8 +88,13 @@ enum Command {
     /// turns rules off for its line, or for the next line when it's on a
     /// line of its own. It takes several rules, separated by commas.
     ///
-    /// Exits with 1 if a rule flags anything, and with 2 if a file can't be
-    /// checked: it can't be read or has syntax errors.
+    /// With `--fix`, fixes what the rules can, overwriting each file, and
+    /// reports the problems left. Standard input's fixed text goes to
+    /// standard output, and its problems to standard error.
+    ///
+    /// Exits with 1 if a rule flags anything, or with `--fix` if anything is
+    /// left, and with 2 if a file can't be checked: it can't be read or
+    /// written or has syntax errors.
     #[command(after_long_help = rules_help())]
     Check {
         /// The files and directories to check; the current directory when
@@ -101,6 +106,11 @@ enum Command {
         /// Ruff does, or `concise`, one line each
         #[arg(long, value_name = "FORMAT", default_value = "full")]
         output_format: OutputFormat,
+
+        /// Fix what the rules can, overwriting each file, and report what's
+        /// left
+        #[arg(long)]
+        fix: bool,
 
         /// When to color the output; `auto` colors it on a terminal, unless
         /// `NO_COLOR` is set
@@ -168,10 +178,14 @@ fn run(cli: Cli) -> ExitCode {
         Command::Check {
             files,
             output_format,
+            fix,
             color,
         } => lint(
             files,
-            output_format,
+            Linting {
+                format: output_format,
+                fix,
+            },
             Paints {
                 out: Paint::new(color, &std::io::stdout()),
                 err: Paint::new(color, &std::io::stderr()),
@@ -867,7 +881,7 @@ fn rules_help() -> String {
 
 /// `scruff check`: each file against the lint rules, in parallel, reported
 /// in the order given.
-fn lint(files: Vec<PathBuf>, format: OutputFormat, paints: Paints) -> ExitCode {
+fn lint(files: Vec<PathBuf>, how: Linting, paints: Paints) -> ExitCode {
     let error = |message: &str| eprint!("{}", paints.err.error(message));
     let stdin = |f: &PathBuf| f.as_os_str() == "-";
     if files.iter().any(stdin) && files.len() > 1 {
@@ -885,7 +899,21 @@ fn lint(files: Vec<PathBuf>, format: OutputFormat, paints: Paints) -> ExitCode {
             }
         };
         vec![match read_text(None) {
-            Ok((name, source)) => lint_source(&name, &source, &rules, format, paints),
+            Ok((name, source)) => {
+                // Problems go to standard error, so standard output holds
+                // only the fixed text.
+                let paints = if how.fix {
+                    Paints {
+                        out: paints.err,
+                        ..paints
+                    }
+                } else {
+                    paints
+                };
+                let (mut linted, fixed) = lint_source(&name, &source, &rules, how, paints);
+                linted.fixed_source = how.fix.then(|| fixed.unwrap_or(source));
+                linted
+            }
             Err(message) => Linted::failed(paints.err.error(&message)),
         }]
     } else {
@@ -912,17 +940,25 @@ fn lint(files: Vec<PathBuf>, format: OutputFormat, paints: Paints) -> ExitCode {
             .filter_map(|file| match configs.for_file(file) {
                 Some((_, Err(_))) => Some(Linted::failed(String::new())),
                 Some((_, Ok(config))) if !config.includes(file) => None,
-                Some((_, Ok(config))) => Some(lint_file(file, &config.lint_rules, format, paints)),
-                None => Some(lint_file(file, &lint::Rule::defaults(), format, paints)),
+                Some((_, Ok(config))) => Some(lint_file(file, &config.lint_rules, how, paints)),
+                None => Some(lint_file(file, &lint::Rule::defaults(), how, paints)),
             })
             .collect()
     };
 
-    let (mut problems, mut checked) = (0, 0);
+    let (mut problems, mut checked, mut fixed, mut fixable) = (0, 0, 0, 0);
     for outcome in &outcomes {
-        print!("{}", outcome.output);
+        match &outcome.fixed_source {
+            Some(source) => {
+                eprint!("{}", outcome.output);
+                print!("{source}");
+            }
+            None => print!("{}", outcome.output),
+        }
         eprint!("{}", outcome.messages);
         problems += outcome.problems;
+        fixed += outcome.fixed;
+        fixable += outcome.fixable;
         if outcome.failed {
             code = 2;
         } else {
@@ -937,20 +973,50 @@ fn lint(files: Vec<PathBuf>, format: OutputFormat, paints: Paints) -> ExitCode {
             "{} no files to check under the given paths",
             paints.err.paint(WARNING, "warning:")
         );
-    } else if problems > 0 {
-        let s = if problems == 1 { "" } else { "s" };
-        println!("Found {problems} problem{s}.");
-    } else if checked > 0 {
+    } else if problems + fixed > 0 {
+        let found = problems + fixed;
+        let s = if found == 1 { "" } else { "s" };
+        let summary = if how.fix {
+            format!("Found {found} problem{s} ({fixed} fixed, {problems} remaining).")
+        } else {
+            format!("Found {found} problem{s}.")
+        };
+        let mut summary = summary + "\n";
+        if fixable > 0 && !how.fix {
+            summary += &format!("[*] {fixable} fixable with the `--fix` option.\n");
+        }
+        // With standard input's fixed text on standard output, the count
+        // goes to standard error.
+        if outcomes.iter().any(|o| o.fixed_source.is_some()) {
+            eprint!("{summary}");
+        } else {
+            print!("{summary}");
+        }
+    } else if checked > 0 && outcomes.iter().all(|o| o.fixed_source.is_none()) {
         println!("All checks passed!");
     }
     ExitCode::from(code)
 }
 
+/// How `scruff check` runs.
+#[derive(Clone, Copy)]
+struct Linting {
+    format: OutputFormat,
+    /// Whether to fix what the rules can.
+    fix: bool,
+}
+
 /// What checking one file came to.
 struct Linted {
-    /// The problems found, one per line.
+    /// The problems left, one per line.
     output: String,
     problems: usize,
+    /// How many problems `--fix` fixed.
+    fixed: usize,
+    /// How many of the problems left `--fix` would fix.
+    fixable: usize,
+    /// With `--fix` on standard input, the text to print.
+    fixed_source: Option<String>,
     /// Errors, for standard error.
     messages: String,
     failed: bool,
@@ -961,45 +1027,75 @@ impl Linted {
         Linted {
             output: String::new(),
             problems: 0,
+            fixed: 0,
+            fixable: 0,
+            fixed_source: None,
             messages,
             failed: true,
         }
     }
 }
 
-fn lint_file(file: &Path, rules: &[lint::Rule], format: OutputFormat, paints: Paints) -> Linted {
+fn lint_file(file: &Path, rules: &[lint::Rule], how: Linting, paints: Paints) -> Linted {
     let name = file.strip_prefix(".").unwrap_or(file).display().to_string();
-    match std::fs::read_to_string(file) {
-        Ok(source) => lint_source(&name, &source, rules, format, paints),
-        Err(err) => Linted::failed(paints.err.error(&format!("can't read {name}: {err}"))),
+    let source = match std::fs::read_to_string(file) {
+        Ok(source) => source,
+        Err(err) => return Linted::failed(paints.err.error(&format!("can't read {name}: {err}"))),
+    };
+    let (linted, fixed) = lint_source(&name, &source, rules, how, paints);
+    match fixed.map(|fixed| std::fs::write(file, fixed)) {
+        Some(Err(err)) => Linted::failed(paints.err.error(&format!("can't write {name}: {err}"))),
+        _ => linted,
     }
 }
 
+/// Checks `source`, and with `--fix` fixes it, giving the fixed text when
+/// it changed.
 fn lint_source(
     name: &str,
     source: &str,
     rules: &[lint::Rule],
-    format: OutputFormat,
+    how: Linting,
     paints: Paints,
-) -> Linted {
-    let tree = lossless_tree::parse(source);
-    match lint::check_tree(&tree, rules) {
-        Ok(diagnostics) => {
+) -> (Linted, Option<String>) {
+    let checked = if how.fix {
+        lint::fix(source, rules)
+    } else {
+        let tree = lossless_tree::parse(source);
+        lint::check_tree(&tree, rules).map(|diagnostics| lint::Fixed {
+            source: source.to_string(),
+            tree,
+            fixed: 0,
+            diagnostics,
+        })
+    };
+    match checked {
+        Ok(lint::Fixed {
+            source: fixed_source,
+            tree,
+            fixed,
+            diagnostics,
+        }) => {
             let mut output = String::new();
             for diagnostic in &diagnostics {
-                output += &match format {
+                output += &match how.format {
                     OutputFormat::Full => full_problem(name, &tree, diagnostic, paints.out),
                     OutputFormat::Concise => concise_problem(name, &tree, diagnostic, paints.out),
                 };
             }
-            Linted {
+            let linted = Linted {
                 output,
                 problems: diagnostics.len(),
+                fixed,
+                fixable: diagnostics.iter().filter(|d| d.fix.is_some()).count(),
+                fixed_source: None,
                 messages: String::new(),
                 failed: false,
-            }
+            };
+            (linted, (fixed > 0).then_some(fixed_source))
         }
         Err(lint::LintError::SyntaxErrors(errors)) => {
+            let tree = lossless_tree::parse(source);
             let paint = paints.err;
             let mut messages = String::new();
             for error in errors {
@@ -1010,7 +1106,7 @@ fn lint_source(
                 "{}: not checked because of syntax errors\n",
                 paint.paint(LOCATION, name)
             );
-            Linted::failed(messages)
+            (Linted::failed(messages), None)
         }
     }
 }

@@ -11,6 +11,9 @@
 //! A `// scruff: ignore(S004)` comment turns rules off for a line; see
 //! `lint/suppression.rs`.
 //!
+//! A rule may also have a `fix` function, which gives the text to put in
+//! place of what it flags; [`fix`] applies those edits.
+//!
 //! To add a rule, add its file, a [`Rule`] variant, and the variant's arm in
 //! each `match` below.
 
@@ -22,6 +25,7 @@ mod no_return;
 mod no_var;
 mod no_while;
 mod no_xml;
+mod sbt_0_13_syntax;
 mod suppression;
 mod untyped_implicit_val;
 
@@ -84,6 +88,8 @@ pub enum Rule {
     NoXml,
     /// `def f() { ... }`; see `lint/no_procedure_syntax.rs`.
     NoProcedureSyntax,
+    /// sbt 0.13's `key in Scope`; see `lint/sbt_0_13_syntax.rs`.
+    Sbt013Syntax,
     /// `implicit val x = ...`; see `lint/untyped_implicit_val.rs`.
     UntypedImplicitVal,
 }
@@ -99,6 +105,7 @@ impl Rule {
         Rule::NoAsInstanceOf,
         Rule::NoXml,
         Rule::NoProcedureSyntax,
+        Rule::Sbt013Syntax,
         Rule::UntypedImplicitVal,
     ];
 
@@ -113,6 +120,7 @@ impl Rule {
             Rule::NoAsInstanceOf => "no_asinstanceof",
             Rule::NoXml => "no_xml",
             Rule::NoProcedureSyntax => "no_procedure_syntax",
+            Rule::Sbt013Syntax => "sbt_0_13_syntax",
             Rule::UntypedImplicitVal => "untyped_implicit_val",
         }
     }
@@ -135,6 +143,8 @@ impl Rule {
             Rule::NoXml => true,
             // Scala 3 doesn't accept it.
             Rule::NoProcedureSyntax => true,
+            // `in` is a common method name outside build files.
+            Rule::Sbt013Syntax => false,
             // Scala 3 rejects it.
             Rule::UntypedImplicitVal => true,
         }
@@ -160,6 +170,7 @@ impl Rule {
             Rule::NoAsInstanceOf => (Category::Style, 6),
             Rule::NoXml => (Category::Style, 7),
             Rule::NoProcedureSyntax => (Category::Style, 8),
+            Rule::Sbt013Syntax => (Category::Style, 9),
             Rule::UntypedImplicitVal => (Category::Correctness, 1),
         }
     }
@@ -190,6 +201,7 @@ impl Rule {
             Rule::NoAsInstanceOf => no_asinstanceof::SUMMARY,
             Rule::NoXml => no_xml::SUMMARY,
             Rule::NoProcedureSyntax => no_procedure_syntax::SUMMARY,
+            Rule::Sbt013Syntax => sbt_0_13_syntax::SUMMARY,
             Rule::UntypedImplicitVal => untyped_implicit_val::SUMMARY,
         }
     }
@@ -205,6 +217,7 @@ impl Rule {
             Rule::NoAsInstanceOf => no_asinstanceof::MESSAGE,
             Rule::NoXml => no_xml::MESSAGE,
             Rule::NoProcedureSyntax => no_procedure_syntax::MESSAGE,
+            Rule::Sbt013Syntax => sbt_0_13_syntax::MESSAGE,
             Rule::UntypedImplicitVal => untyped_implicit_val::MESSAGE,
         }
     }
@@ -220,7 +233,25 @@ impl Rule {
             Rule::NoAsInstanceOf => no_asinstanceof::check(element),
             Rule::NoXml => no_xml::check(element),
             Rule::NoProcedureSyntax => no_procedure_syntax::check(element),
+            Rule::Sbt013Syntax => sbt_0_13_syntax::check(element),
             Rule::UntypedImplicitVal => untyped_implicit_val::check(element),
+        }
+    }
+
+    /// The edit that fixes what this rule flags in `element`, if the rule
+    /// can fix it.
+    fn fix(self, element: &SyntaxElement<'_>) -> Option<Edit> {
+        match self {
+            Rule::Sbt013Syntax => sbt_0_13_syntax::fix(element),
+            Rule::NoReturn
+            | Rule::NoVar
+            | Rule::NoDefaultParam
+            | Rule::NoNull
+            | Rule::NoWhile
+            | Rule::NoAsInstanceOf
+            | Rule::NoXml
+            | Rule::NoProcedureSyntax
+            | Rule::UntypedImplicitVal => None,
         }
     }
 }
@@ -300,6 +331,15 @@ pub struct Diagnostic {
     pub rule: Rule,
     pub range: TextRange,
     pub message: String,
+    /// What `--fix` puts in its place, when the rule can fix it.
+    pub fix: Option<Edit>,
+}
+
+/// Text to put in place of a range of the source.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Edit {
+    pub range: TextRange,
+    pub replacement: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -347,11 +387,76 @@ pub fn check_tree(tree: &Tree, rules: &[Rule]) -> Result<Vec<Diagnostic>, LintEr
                     rule,
                     range,
                     message: rule.message().to_string(),
+                    fix: rule.fix(&element),
                 });
             }
         }
     }
+    // A node is visited before its children, though what a rule flags in
+    // it, as an operator, can come after theirs. The sort is stable, so
+    // the table's order holds within a place.
+    diagnostics.sort_by_key(|d| d.range.start());
     Ok(diagnostics)
+}
+
+/// What [`fix`] came to: the source with the fixes in, its tree, and the
+/// problems left in it.
+pub struct Fixed {
+    pub source: String,
+    pub tree: Tree,
+    /// How many problems were fixed.
+    pub fixed: usize,
+    pub diagnostics: Vec<Diagnostic>,
+}
+
+/// How many times [`fix`] checks again, since one fix can make way for
+/// another, as when one `in` holds another.
+const FIX_PASSES: usize = 10;
+
+/// Checks `source` against `rules` and fixes what they can, checking again
+/// after each round of edits until none apply. Edits that overlap one
+/// another wait for the next round. A round whose result doesn't parse is
+/// dropped, leaving its problems unfixed.
+pub fn fix(source: &str, rules: &[Rule]) -> Result<Fixed, LintError> {
+    let mut source = source.to_string();
+    let mut tree = parse(&source);
+    let mut diagnostics = check_tree(&tree, rules)?;
+    let mut fixed = 0;
+    for _ in 0..FIX_PASSES {
+        let mut edits: Vec<&Edit> = diagnostics.iter().filter_map(|d| d.fix.as_ref()).collect();
+        edits.sort_by_key(|edit| (edit.range.start(), edit.range.end()));
+        let mut applied: Vec<&Edit> = Vec::new();
+        for edit in edits {
+            if applied
+                .last()
+                .is_none_or(|last| last.range.end() <= edit.range.start())
+            {
+                applied.push(edit);
+            }
+        }
+        if applied.is_empty() {
+            break;
+        }
+        let mut next = source.clone();
+        for edit in applied.iter().rev() {
+            next.replace_range(
+                std::ops::Range::<usize>::from(edit.range),
+                &edit.replacement,
+            );
+        }
+        let next_tree = parse(&next);
+        let Ok(next_diagnostics) = check_tree(&next_tree, rules) else {
+            break;
+        };
+        fixed += applied.len();
+        (source, tree, diagnostics) = (next, next_tree, next_diagnostics);
+    }
+    Ok(Fixed {
+        source,
+        tree,
+        fixed,
+        diagnostics,
+    })
 }
 
 /// Where `rule` flags `source`, each place as `line:col`, for the rules'
@@ -369,9 +474,37 @@ fn flagged(rule: Rule, source: &str) -> Vec<String> {
         .collect()
 }
 
+/// `source` with `rule`'s fixes in, for the rules' tests.
+#[cfg(test)]
+fn fixed(rule: Rule, source: &str) -> String {
+    fix(source, &[rule]).unwrap().source
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn fix_applies_edits_until_none_are_left() {
+        let source = "a in Compile := 1\nb in (Compile, console) := 2\nc in core := 3\n";
+        let result = fix(source, &[Rule::Sbt013Syntax, Rule::NoNull]).unwrap();
+        assert_eq!(
+            result.source,
+            "Compile / a := 1\nCompile / console / b := 2\ncore / c := 3\n"
+        );
+        assert_eq!(result.fixed, 3);
+        assert!(result.diagnostics.is_empty());
+    }
+
+    #[test]
+    fn fix_leaves_what_it_cannot_fix() {
+        let source = "val a = null\nb in Compile := 1\n";
+        let result = fix(source, &[Rule::Sbt013Syntax, Rule::NoNull]).unwrap();
+        assert_eq!(result.source, "val a = null\nCompile / b := 1\n");
+        assert_eq!(result.fixed, 1);
+        let left: Vec<Rule> = result.diagnostics.iter().map(|d| d.rule).collect();
+        assert_eq!(left, [Rule::NoNull]);
+    }
 
     #[test]
     fn codes_are_unique_and_well_formed() {

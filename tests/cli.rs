@@ -579,6 +579,74 @@ fn check_reports_each_problem_in_order_and_exits_with_1() {
     );
 }
 
+const SBT_IN: &str = "fork in run := true\na in Compile in core := 1\n";
+const SBT_SLASH: &str = "run / fork := true\nCompile / a in core := 1\n";
+const SBT_LINT: &str = "[lint]\nextend-select = [\"sbt_0_13_syntax\"]\n";
+
+#[test]
+fn check_counts_what_fix_would_fix() {
+    let dir = repository(
+        "check_fixable",
+        &[("build.sbt", SBT_IN), (".scruff.toml", SBT_LINT)],
+    );
+    let out = scruff_in(&dir, &["check", "--output-format", "concise"], "");
+    assert_eq!(out.status.code(), Some(1));
+    assert!(
+        text(&out.stdout).ends_with("Found 3 problems.\n[*] 2 fixable with the `--fix` option.\n"),
+        "{}",
+        text(&out.stdout)
+    );
+    assert_eq!(read(&dir, "build.sbt"), SBT_IN);
+}
+
+#[test]
+fn check_fix_overwrites_files_and_reports_what_is_left() {
+    let dir = repository(
+        "check_fix",
+        &[("build.sbt", SBT_IN), (".scruff.toml", SBT_LINT)],
+    );
+    let out = scruff_in(&dir, &["check", "--fix", "--output-format", "concise"], "");
+    assert_eq!(out.status.code(), Some(1));
+    assert_eq!(read(&dir, "build.sbt"), SBT_SLASH);
+    let stdout = text(&out.stdout);
+    assert!(
+        stdout.starts_with("build.sbt:2:13: S009 sbt_0_13_syntax"),
+        "{stdout}"
+    );
+    assert!(
+        stdout.ends_with("Found 3 problems (2 fixed, 1 remaining).\n"),
+        "{stdout}"
+    );
+
+    // With nothing left, it passes.
+    std::fs::write(dir.join("build.sbt"), "fork in run := true\n").unwrap();
+    let out = scruff_in(&dir, &["check", "--fix"], "");
+    assert_eq!(out.status.code(), Some(0));
+    assert_eq!(read(&dir, "build.sbt"), "run / fork := true\n");
+    assert_eq!(
+        text(&out.stdout),
+        "Found 1 problem (1 fixed, 0 remaining).\n"
+    );
+}
+
+#[test]
+fn check_fix_on_standard_input_prints_the_fixed_text() {
+    let dir = repository("check_fix_stdin", &[(".scruff.toml", SBT_LINT)]);
+    let out = scruff_in(
+        &dir,
+        &["check", "--fix", "--output-format", "concise", "-"],
+        SBT_IN,
+    );
+    assert_eq!(out.status.code(), Some(1));
+    assert_eq!(text(&out.stdout), SBT_SLASH);
+    let stderr = text(&out.stderr);
+    assert!(stderr.starts_with("<stdin>:2:13: S009"), "{stderr}");
+    assert!(
+        stderr.ends_with("Found 3 problems (2 fixed, 1 remaining).\n"),
+        "{stderr}"
+    );
+}
+
 #[test]
 fn check_passes_without_problems() {
     let out = scruff(&["check", "-"], "object A:\n  def f(x: Int) = x + 1\n");

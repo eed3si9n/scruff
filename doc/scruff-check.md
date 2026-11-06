@@ -4,11 +4,12 @@
 
 `scruff` `check` \[ _options_ \] \[ _file_ | _dir..._ | `-` \]
 
-Scruff linter (`check`) is a fast Scala linter. It checks the given files and directories against the lint rules, or the current directory when none are given. `-` reads standard input. Files are found as `scruff fmt` finds them, following the same include and exclude paths. Exits with 1 if a rule flags anything, and with 2 if a file can't be checked because it can't be read or has syntax errors.
+Scruff linter (`check`) is a fast Scala linter. It checks the given files and directories against the lint rules, or the current directory when none are given. `-` reads standard input. Files are found as `scruff fmt` finds them, following the same include and exclude paths. Exits with 1 if a rule flags anything, or with `--fix` if anything is left, and with 2 if a file can't be checked because it can't be read or written or has syntax errors.
 
 | Option                               | Effect                                                                                                                              |
 | ------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------- |
 | <nobr>`--output-format` _how_</nobr> | `full` (default) shows each problem with the lines around it; `concise` prints one line each, as `file:line:col: code rule message` |
+| `--fix`                              | fixes what the rules can, overwriting each file, and reports what's left; on `-`, prints the fixed text and reports to stderr      |
 | `--color` _when_                     | `auto` (default), `always` or `never`; `auto` colors on a terminal unless `NO_COLOR` is set                                         |
 
 ### Micro benchmark
@@ -91,6 +92,27 @@ sbt:sbt-vimquit-root> scruff check
 [error] elapsed time: 0 s
 ```
 
+## Fixes
+
+Some rules can fix what they flag. Without `--fix`, the count says how many:
+
+```bash
+$ scruff check
+...
+Found 3 problems.
+[*] 2 fixable with the `--fix` option.
+```
+
+`--fix` makes those edits, writes the files, and reports the problems left:
+
+```bash
+$ scruff check --fix
+...
+Found 3 problems (2 fixed, 1 remaining).
+```
+
+After each round of edits, scruff checks the result again, since one fix can make way for another. A round whose result doesn't parse is dropped. Problems turned off with `scruff: ignore` aren't fixed.
+
 ## Error suppression
 
 To suppress the lint error, write a comment next to or above the use site in the format of `scruff: ignore(no_null)`:
@@ -109,14 +131,15 @@ object A:
 
 The initial of a rule's code is its category: `C` correctness, `S` style.
 
-| Code | Rule                   | Flags                                                 | Default |
-| ---- | ---------------------- | ----------------------------------------------------- | ------- |
-| C001 | `untyped_implicit_val` | `implicit val` members without a type                 | ✓       |
-| S001 | `no_return`            | `return` statements                                   | ✓       |
-| S002 | `no_var`               | `var` definitions, declarations and class parameters  |         |
-| S003 | `no_default_param`     | default values of parameters                          |         |
-| S004 | `no_null`              | `null`                                                | ✓       |
-| S005 | `no_while`             | `while` and `do … while` loops                        |         |
-| S006 | `no_asinstanceof`      | casts with `asInstanceOf`                             |         |
-| S007 | `no_xml`               | XML literals and patterns                             | ✓       |
-| S008 | `no_procedure_syntax`  | `def f() { ... }` and `def f()` without a result type | ✓       |
+| Code | Rule                   | Flags                                                 | Default | Fix |
+| ---- | ---------------------- | ----------------------------------------------------- | ------- | --- |
+| C001 | `untyped_implicit_val` | `implicit val` members without a type                 | ✓       |     |
+| S001 | `no_return`            | `return` statements                                   | ✓       |     |
+| S002 | `no_var`               | `var` definitions, declarations and class parameters  |         |     |
+| S003 | `no_default_param`     | default values of parameters                          |         |     |
+| S004 | `no_null`              | `null`                                                | ✓       |     |
+| S005 | `no_while`             | `while` and `do … while` loops                        |         |     |
+| S006 | `no_asinstanceof`      | casts with `asInstanceOf`                             |         |     |
+| S007 | `no_xml`               | XML literals and patterns                             | ✓       |     |
+| S008 | `no_procedure_syntax`  | `def f() { ... }` and `def f()` without a result type | ✓       |     |
+| S009 | `sbt_0_13_syntax`      | sbt 0.13's `key in Scope`                             |         | ✓   |
