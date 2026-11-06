@@ -123,37 +123,7 @@ Found 3 problems (2 fixed, 1 remaining).
 
 After each round of edits, scruff checks the result again, since one fix can make way for another. A round whose result doesn't parse is dropped. Problems turned off with `scruff: ignore` aren't fixed.
 
-### Migrating from sbt 0.13 syntax
-
-`sbt_0_13_syntax` isn't on by default, but `--select` can run it, and only it, without changing the configuration. `--fix` then rewrites `key in Scope` to the slash syntax that sbt 2 requires:
-
-```bash
-$ scruff check --select sbt_0_13_syntax --fix
-```
-
-Given this `build.sbt`:
-
-```scala
-lazy val core = project
-  .settings(
-    scalacOptions in Compile += "-deprecation",
-    scalacOptions in (Compile, console) := Nil,
-    fork in Test := true,
-  )
-```
-
-it writes:
-
-```scala
-lazy val core = project
-  .settings(
-    Compile / scalacOptions += "-deprecation",
-    Compile / console / scalacOptions := Nil,
-    Test / fork := true,
-  )
-```
-
-and prints `Found 3 problems (3 fixed, 0 remaining).`, exiting with 0. Any `.sbt`, `.scala` or `.sc` file it finds is checked, `project/*.scala` included. If one `in` follows another, as in `sources in Compile in core`, scruff can't tell the project from the configuration from the syntax alone. It reports the problem as remaining and exits with 1, so you can write `core / Compile / sources` yourself.
+To migrate a build from sbt 0.13's `key in Scope` to the slash syntax, see [S009 sbt_0_13_syntax](S009_sbt_0_13_syntax.md).
 
 ## Error suppression
 
@@ -183,5 +153,5 @@ The initial of a rule's code is its category: `C` correctness, `S` style.
 | S005 | `no_while`             | `while` and `do … while` loops                        |         |     |
 | S006 | `no_asinstanceof`      | casts with `asInstanceOf`                             |         |     |
 | S007 | `no_xml`               | XML literals and patterns                             | ✓       |     |
-| S008 | `procedure_syntax`     | `def f() { ... }` and `def f()` without a result type | ✓       | ✓   |
-| S009 | `sbt_0_13_syntax`      | sbt 0.13's `key in Scope`                             |         | ✓   |
+| [S008](S008_procedure_syntax.md) | `procedure_syntax`     | `def f() { ... }` and `def f()` without a result type | ✓       | ✓   |
+| [S009](S009_sbt_0_13_syntax.md) | `sbt_0_13_syntax`      | sbt 0.13's `key in Scope`                             |         | ✓   |
