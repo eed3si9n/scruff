@@ -330,7 +330,10 @@ fn edits_for(
             SyntaxKind::CallExpression if dialect.fewer_braces => {
                 edits.extend(fewer_braces(tree, node).into_iter().flatten());
             }
-            SyntaxKind::ColonArgument if !dialect.fewer_braces => {
+            // tree-sitter-scala reads `{ _: A =>` with the body on the next
+            // lines as `_` called with a colon argument, `A =>`: there's no
+            // call to put braces around.
+            SyntaxKind::ColonArgument if !dialect.fewer_braces && !wildcard_call(node) => {
                 edits.extend(fewer_braces_back(tree, node).into_iter().flatten());
             }
             SyntaxKind::ArrowRenamedIdentifier if dialect.as_for_import_rename => {
@@ -1144,6 +1147,15 @@ fn lists_start_width(text: &str, token: SyntaxToken<'_>) -> Option<usize> {
 /// `.` or closing bracket starting the next line goes after the `}`, as
 /// in `}.filter(p)`, and a closing bracket after the body on its line goes
 /// after the `}` too. None if it ends in an end marker.
+/// Whether `argument` is a colon argument to `_`, which is how
+/// tree-sitter-scala reads a lambda's typed wildcard parameter.
+fn wildcard_call(argument: SyntaxNode<'_>) -> bool {
+    argument
+        .parent()
+        .and_then(|call| call.child_by_field_name("function"))
+        .is_some_and(|function| function.kind() == SyntaxKind::Wildcard)
+}
+
 pub(super) fn fewer_braces_back(tree: &Tree, argument: SyntaxNode<'_>) -> Option<Vec<Edit>> {
     let text = tree.syntax().text();
     let colon = previous_code(argument.tokens().find(|t| t.owns_trivia())?)?;
