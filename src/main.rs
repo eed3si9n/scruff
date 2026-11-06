@@ -89,6 +89,8 @@ enum Command {
     /// A comment `// scruff: ignore(S004)` or `// scruff: ignore(no_null)`
     /// turns rules off for its line, or for the next line when it's on a
     /// line of its own. It takes several rules, separated by commas.
+    /// `// scruff: file_ignore(S004)` turns rules off for the whole file,
+    /// and `// scruff: noqa` turns every rule off for it.
     ///
     /// With `--fix`, fixes what the rules can, overwriting each file, and
     /// reports the problems left. Standard input's fixed text goes to

@@ -9,7 +9,7 @@ Scruff linter (`check`) is a fast Scala linter. It checks the given files and di
 | Option                               | Effect                                                                                                                              |
 | ------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------- |
 | <nobr>`--output-format` _how_</nobr> | `full` (default) shows each problem with the lines around it; `concise` prints one line each, as `file:line:col: code rule message` |
-| `--fix`                              | fixes what the rules can, overwriting each file, and reports what's left; on `-`, prints the fixed text and reports to stderr      |
+| `--fix`                              | fixes what the rules can, overwriting each file, and reports what's left; on `-`, prints the fixed text and reports to stderr       |
 | `--select` _rules_                   | runs these rules in place of what `[lint]` selects, `ignore` included; names, codes or starts of codes, separated by commas         |
 | `--ignore` _rules_                   | turns these rules off, on top of `--select` or what `[lint]` selects; separated by commas                                           |
 | `--color` _when_                     | `auto` (default), `always` or `never`; `auto` colors on a terminal unless `NO_COLOR` is set                                         |
@@ -121,11 +121,13 @@ $ scruff check --fix
 Found 3 problems (2 fixed, 1 remaining).
 ```
 
-After each round of edits, scruff checks the result again, since one fix can make way for another. A round whose result doesn't parse is dropped. Problems turned off with `scruff: ignore` aren't fixed.
+To opt out of rules for a line or a whole file, see [Error suppression](#error-suppression).
 
 To migrate a build from sbt 0.13's `key in Scope` to the slash syntax, see [S009 sbt_0_13_syntax](S009_sbt_0_13_syntax.md).
 
 ## Error suppression
+
+### Line-level
 
 To suppress the lint error, write a comment next to or above the use site in the format of `scruff: ignore(no_null)`:
 
@@ -139,19 +141,36 @@ object A:
   var d: String = null
 ```
 
+### File-level
+
+To suppress lint errors in the whole file, write `scruff: file_ignore(...)` with the rules to turn off, or `scruff: noqa` to turn off every rule, preferably towards the top of the file:
+
+```scala
+// scruff: file_ignore(no_null, S002)
+package example
+
+object A:
+  var a: String = null
+```
+
+```scala
+// scruff: noqa
+package example.generated
+```
+
 ## Rules
 
 The initial of a rule's code is its category: `C` correctness, `S` style.
 
-| Code | Rule                   | Flags                                                 | Default | Fix |
-| ---- | ---------------------- | ----------------------------------------------------- | ------- | --- |
-| C001 | `untyped_implicit_val` | `implicit val` members without a type                 | ✓       |     |
-| S001 | `no_return`            | `return` statements                                   | ✓       |     |
-| S002 | `no_var`               | `var` definitions, declarations and class parameters  |         |     |
-| S003 | `no_default_param`     | default values of parameters                          |         |     |
-| S004 | `no_null`              | `null`                                                | ✓       |     |
-| S005 | `no_while`             | `while` and `do … while` loops                        |         |     |
-| S006 | `no_asinstanceof`      | casts with `asInstanceOf`                             |         |     |
-| S007 | `no_xml`               | XML literals and patterns                             | ✓       |     |
+| Code                             | Rule                   | Flags                                                 | Default | Fix |
+| -------------------------------- | ---------------------- | ----------------------------------------------------- | ------- | --- |
+| C001                             | `untyped_implicit_val` | `implicit val` members without a type                 | ✓       |     |
+| S001                             | `no_return`            | `return` statements                                   | ✓       |     |
+| S002                             | `no_var`               | `var` definitions, declarations and class parameters  |         |     |
+| S003                             | `no_default_param`     | default values of parameters                          |         |     |
+| S004                             | `no_null`              | `null`                                                | ✓       |     |
+| S005                             | `no_while`             | `while` and `do … while` loops                        |         |     |
+| S006                             | `no_asinstanceof`      | casts with `asInstanceOf`                             |         |     |
+| S007                             | `no_xml`               | XML literals and patterns                             | ✓       |     |
 | [S008](S008_procedure_syntax.md) | `procedure_syntax`     | `def f() { ... }` and `def f()` without a result type | ✓       | ✓   |
-| [S009](S009_sbt_0_13_syntax.md) | `sbt_0_13_syntax`      | sbt 0.13's `key in Scope`                             |         | ✓   |
+| [S009](S009_sbt_0_13_syntax.md)  | `sbt_0_13_syntax`      | sbt 0.13's `key in Scope`                             |         | ✓   |

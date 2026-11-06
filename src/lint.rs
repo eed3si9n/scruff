@@ -9,8 +9,9 @@
 //! runs by default. [`check`] walks the tree once and asks the selected
 //! rules about every node and token.
 //!
-//! A `// scruff: ignore(S004)` comment turns rules off for a line; see
-//! `lint/suppression.rs`.
+//! A `// scruff: ignore(S004)` comment turns rules off for a line, and
+//! `// scruff: file_ignore(S004)` or `// scruff: noqa` for the whole file;
+//! see `lint/suppression.rs`.
 //!
 //! [`fix`] applies the rules' edits.
 //!
