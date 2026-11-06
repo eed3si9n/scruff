@@ -21,7 +21,7 @@ exclude-paths = [
 #   "no_return",
 #   "no_null",
 #   "no_xml",
-#   "no_procedure_syntax",
+#   "procedure_syntax",
 # ]
 ```
 

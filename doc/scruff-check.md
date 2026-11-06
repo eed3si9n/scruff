@@ -41,11 +41,11 @@ version = "0.2.2"
 #   "no_return",
 #   "no_null",
 #   "no_xml",
-#   "no_procedure_syntax",
+#   "procedure_syntax",
 # ]
 ```
 
-Scruff currently selects `untyped_implicit_val`, `no_return`, `no_null`, `no_xml`, and `no_procedure_syntax` rules by default; see [Rules](#rules).
+Scruff currently selects `untyped_implicit_val`, `no_return`, `no_null`, `no_xml`, and `procedure_syntax` rules by default; see [Rules](#rules).
 
 To extend the default, use `exend-select`, and to opt out from defaults use `ignore` as follows:
 
@@ -183,5 +183,5 @@ The initial of a rule's code is its category: `C` correctness, `S` style.
 | S005 | `no_while`             | `while` and `do … while` loops                        |         |     |
 | S006 | `no_asinstanceof`      | casts with `asInstanceOf`                             |         |     |
 | S007 | `no_xml`               | XML literals and patterns                             | ✓       |     |
-| S008 | `no_procedure_syntax`  | `def f() { ... }` and `def f()` without a result type | ✓       |     |
+| S008 | `procedure_syntax`     | `def f() { ... }` and `def f()` without a result type | ✓       | ✓   |
 | S009 | `sbt_0_13_syntax`      | sbt 0.13's `key in Scope`                             |         | ✓   |

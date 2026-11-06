@@ -3,7 +3,8 @@
 //!
 //! Each rule has a file of its own under `lint/`, with its documentation,
 //! its message, a `check` function that looks at one node or token, and
-//! its tests.
+//! its tests. `check` gives where the rule flags; a rule that can fix
+//! what it flags gives a [`Finding`] instead, with the edit.
 //! This file holds the table of rules: each one's name, code and whether it
 //! runs by default. [`check`] walks the tree once and asks the selected
 //! rules about every node and token.
@@ -11,8 +12,7 @@
 //! A `// scruff: ignore(S004)` comment turns rules off for a line; see
 //! `lint/suppression.rs`.
 //!
-//! A rule may also have a `fix` function, which gives the text to put in
-//! place of what it flags; [`fix`] applies those edits.
+//! [`fix`] applies the rules' edits.
 //!
 //! To add a rule, add its file, a [`Rule`] variant, and the variant's arm in
 //! each `match` below.
@@ -20,18 +20,18 @@
 mod no_asinstanceof;
 mod no_default_param;
 mod no_null;
-mod no_procedure_syntax;
 mod no_return;
 mod no_var;
 mod no_while;
 mod no_xml;
+mod procedure_syntax;
 mod sbt_0_13_syntax;
 mod suppression;
 mod untyped_implicit_val;
 
 use std::fmt;
 
-use crate::lossless_tree::{SyntaxElement, SyntaxError, TextRange, Tree, parse};
+use crate::lossless_tree::{SyntaxElement, SyntaxError, TextRange, TextSize, Tree, parse};
 
 /// What kind of problem a rule finds. Its letter starts the rule's code.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -86,8 +86,8 @@ pub enum Rule {
     NoAsInstanceOf,
     /// XML literals; see `lint/no_xml.rs`.
     NoXml,
-    /// `def f() { ... }`; see `lint/no_procedure_syntax.rs`.
-    NoProcedureSyntax,
+    /// `def f() { ... }`; see `lint/procedure_syntax.rs`.
+    ProcedureSyntax,
     /// sbt 0.13's `key in Scope`; see `lint/sbt_0_13_syntax.rs`.
     Sbt013Syntax,
     /// `implicit val x = ...`; see `lint/untyped_implicit_val.rs`.
@@ -104,7 +104,7 @@ impl Rule {
         Rule::NoWhile,
         Rule::NoAsInstanceOf,
         Rule::NoXml,
-        Rule::NoProcedureSyntax,
+        Rule::ProcedureSyntax,
         Rule::Sbt013Syntax,
         Rule::UntypedImplicitVal,
     ];
@@ -119,7 +119,7 @@ impl Rule {
             Rule::NoWhile => "no_while",
             Rule::NoAsInstanceOf => "no_asinstanceof",
             Rule::NoXml => "no_xml",
-            Rule::NoProcedureSyntax => "no_procedure_syntax",
+            Rule::ProcedureSyntax => "procedure_syntax",
             Rule::Sbt013Syntax => "sbt_0_13_syntax",
             Rule::UntypedImplicitVal => "untyped_implicit_val",
         }
@@ -142,7 +142,7 @@ impl Rule {
             // Rare, and Scala 3 plans to drop them.
             Rule::NoXml => true,
             // Scala 3 doesn't accept it.
-            Rule::NoProcedureSyntax => true,
+            Rule::ProcedureSyntax => true,
             // `in` is a common method name outside build files.
             Rule::Sbt013Syntax => false,
             // Scala 3 rejects it.
@@ -169,7 +169,7 @@ impl Rule {
             Rule::NoWhile => (Category::Style, 5),
             Rule::NoAsInstanceOf => (Category::Style, 6),
             Rule::NoXml => (Category::Style, 7),
-            Rule::NoProcedureSyntax => (Category::Style, 8),
+            Rule::ProcedureSyntax => (Category::Style, 8),
             Rule::Sbt013Syntax => (Category::Style, 9),
             Rule::UntypedImplicitVal => (Category::Correctness, 1),
         }
@@ -200,7 +200,7 @@ impl Rule {
             Rule::NoWhile => no_while::SUMMARY,
             Rule::NoAsInstanceOf => no_asinstanceof::SUMMARY,
             Rule::NoXml => no_xml::SUMMARY,
-            Rule::NoProcedureSyntax => no_procedure_syntax::SUMMARY,
+            Rule::ProcedureSyntax => procedure_syntax::SUMMARY,
             Rule::Sbt013Syntax => sbt_0_13_syntax::SUMMARY,
             Rule::UntypedImplicitVal => untyped_implicit_val::SUMMARY,
         }
@@ -216,42 +216,27 @@ impl Rule {
             Rule::NoWhile => no_while::MESSAGE,
             Rule::NoAsInstanceOf => no_asinstanceof::MESSAGE,
             Rule::NoXml => no_xml::MESSAGE,
-            Rule::NoProcedureSyntax => no_procedure_syntax::MESSAGE,
+            Rule::ProcedureSyntax => procedure_syntax::MESSAGE,
             Rule::Sbt013Syntax => sbt_0_13_syntax::MESSAGE,
             Rule::UntypedImplicitVal => untyped_implicit_val::MESSAGE,
         }
     }
 
-    /// Where in `element` this rule flags, if anywhere.
-    fn check(self, element: &SyntaxElement<'_>) -> Option<TextRange> {
+    /// Where in `element` this rule flags, if anywhere, and the edit that
+    /// fixes it, if the rule can fix it.
+    fn check(self, element: &SyntaxElement<'_>) -> Option<Finding> {
+        let at = |range: Option<TextRange>| range.map(Finding::at);
         match self {
-            Rule::NoReturn => no_return::check(element),
-            Rule::NoVar => no_var::check(element),
-            Rule::NoDefaultParam => no_default_param::check(element),
-            Rule::NoNull => no_null::check(element),
-            Rule::NoWhile => no_while::check(element),
-            Rule::NoAsInstanceOf => no_asinstanceof::check(element),
-            Rule::NoXml => no_xml::check(element),
-            Rule::NoProcedureSyntax => no_procedure_syntax::check(element),
+            Rule::NoReturn => at(no_return::check(element)),
+            Rule::NoVar => at(no_var::check(element)),
+            Rule::NoDefaultParam => at(no_default_param::check(element)),
+            Rule::NoNull => at(no_null::check(element)),
+            Rule::NoWhile => at(no_while::check(element)),
+            Rule::NoAsInstanceOf => at(no_asinstanceof::check(element)),
+            Rule::NoXml => at(no_xml::check(element)),
+            Rule::ProcedureSyntax => procedure_syntax::check(element),
             Rule::Sbt013Syntax => sbt_0_13_syntax::check(element),
-            Rule::UntypedImplicitVal => untyped_implicit_val::check(element),
-        }
-    }
-
-    /// The edit that fixes what this rule flags in `element`, if the rule
-    /// can fix it.
-    fn fix(self, element: &SyntaxElement<'_>) -> Option<Edit> {
-        match self {
-            Rule::Sbt013Syntax => sbt_0_13_syntax::fix(element),
-            Rule::NoReturn
-            | Rule::NoVar
-            | Rule::NoDefaultParam
-            | Rule::NoNull
-            | Rule::NoWhile
-            | Rule::NoAsInstanceOf
-            | Rule::NoXml
-            | Rule::NoProcedureSyntax
-            | Rule::UntypedImplicitVal => None,
+            Rule::UntypedImplicitVal => at(untyped_implicit_val::check(element)),
         }
     }
 }
@@ -346,6 +331,30 @@ pub struct Edit {
     pub replacement: String,
 }
 
+impl Edit {
+    /// `text` put in at `offset`.
+    fn insert(offset: TextSize, text: &str) -> Edit {
+        Edit {
+            range: TextRange::empty(offset),
+            replacement: text.to_string(),
+        }
+    }
+}
+
+/// What a rule's `check` finds in one node or token.
+struct Finding {
+    range: TextRange,
+    /// The edit that fixes it, if the rule can fix it.
+    fix: Option<Edit>,
+}
+
+impl Finding {
+    /// A place the rule flags but can't fix.
+    fn at(range: TextRange) -> Finding {
+        Finding { range, fix: None }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum LintError {
     /// The input doesn't parse cleanly, so the tree can't be trusted.
@@ -384,14 +393,14 @@ pub fn check_tree(tree: &Tree, rules: &[Rule]) -> Result<Vec<Diagnostic>, LintEr
     let mut diagnostics = Vec::new();
     for element in tree.syntax().descendants_with_tokens() {
         for &rule in rules {
-            if let Some(range) = rule.check(&element)
+            if let Some(Finding { range, fix }) = rule.check(&element)
                 && !suppressions.covers(tree.line_col(range.start()).0, rule)
             {
                 diagnostics.push(Diagnostic {
                     rule,
                     range,
                     message: rule.message().to_string(),
-                    fix: rule.fix(&element),
+                    fix,
                 });
             }
         }
@@ -550,13 +559,7 @@ mod tests {
     fn only_default_rules_run_unless_selected() {
         use Rule::*;
         // The defaults, spelled out; the other cases follow from them.
-        let defaults = [
-            NoReturn,
-            NoNull,
-            NoXml,
-            NoProcedureSyntax,
-            UntypedImplicitVal,
-        ];
+        let defaults = [NoReturn, NoNull, NoXml, ProcedureSyntax, UntypedImplicitVal];
         assert_eq!(selected(None, &[], &[]), defaults);
         let all_but = |left_out: &[Rule]| -> Vec<Rule> {
             Rule::ALL

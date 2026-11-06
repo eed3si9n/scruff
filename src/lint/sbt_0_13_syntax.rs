@@ -41,7 +41,7 @@
 //! - [Migrating from sbt 0.13.x](https://www.scala-sbt.org/1.x/docs/Migrating-from-sbt-013x.html)
 //! - [Migrating from sbt 1.x](https://www.scala-sbt.org/2.x/docs/en/changes/migrating-from-sbt-1.x.html)
 
-use super::Edit;
+use super::{Edit, Finding};
 use crate::lossless_tree::{SyntaxElement, SyntaxKind, SyntaxNode, TextRange};
 
 /// What the rule flags, for `scruff check --help`.
@@ -50,10 +50,18 @@ pub(super) const SUMMARY: &str = "sbt 0.13's `key in Scope`";
 pub(super) const MESSAGE: &str =
     "`in` is sbt 0.13 syntax, which sbt 2 drops; use the slash syntax, `Compile / key`";
 
-/// `in`, if `element` scopes a key with it.
-pub(super) fn check(element: &SyntaxElement<'_>) -> Option<TextRange> {
+/// `in`, if `element` scopes a key with it, with the slash syntax to put
+/// in its place when [`slash_syntax`] can write it.
+pub(super) fn check(element: &SyntaxElement<'_>) -> Option<Finding> {
+    let node = element.as_node()?;
     let scoping = Scoping::of(element)?;
-    is_scoping(&scoping.key, &scoping.scope).then_some(scoping.in_range)
+    if !is_scoping(&scoping.key, &scoping.scope) {
+        return None;
+    }
+    Some(Finding {
+        range: scoping.in_range,
+        fix: slash_syntax(node, scoping),
+    })
 }
 
 /// The slash syntax in place of `key in scope`, with the scope's parts in
@@ -66,10 +74,7 @@ pub(super) fn check(element: &SyntaxElement<'_>) -> Option<TextRange> {
 /// operator that binds looser than `/`. A chain such as `key in Compile in
 /// core` is left, since syntax can't tell which part is the project. So
 /// is one with a comment inside.
-pub(super) fn fix(element: &SyntaxElement<'_>) -> Option<Edit> {
-    check(element)?;
-    let node = element.as_node()?;
-    let scoping = Scoping::of(element)?;
+fn slash_syntax(node: &SyntaxNode<'_>, scoping: Scoping<'_>) -> Option<Edit> {
     let parts = match scoping.scope.kind() {
         SyntaxKind::TupleExpression => operands(&scoping.scope.into_node()?).collect(),
         _ => vec![scoping.scope],
