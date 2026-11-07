@@ -691,13 +691,10 @@ impl<'t> Formatter<'t> {
                 .any(|d| d.kind() == SyntaxKind::IfExpression)
         });
         // A `case` with nothing after its arrow would take what follows,
-        // and tree-sitter-scala misreads one whose body is in braces or
-        // has a `;`.
+        // and tree-sitter-scala misreads one that has a `;`.
         let empty_case = only.kind() == SyntaxKind::CaseClause
             && only.as_node().is_none_or(|c| {
-                c.child_by_field_name("body")
-                    .is_none_or(|b| b.kind() == SyntaxKind::Block)
-                    || c.tokens().any(|t| t.text() == ";")
+                c.child_by_field_name("body").is_none() || c.tokens().any(|t| t.text() == ";")
             });
         if split_condition
             || in_parentheses

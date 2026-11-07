@@ -70,6 +70,31 @@ def g =
     case e: IOException => b
     case e: Exception   => c
 
+<<< a catch's one case joins its line, also with its body in braces
+def g =
+  try a
+  catch
+    case e: Exception => { b }
+  finally c
+>>>
+def g =
+  try a
+  catch case e: Exception => { b }
+  finally c
+
+<<< a catch's case with a `;` keeps its own line
+def g =
+  try a
+  catch
+    case e: Exception => log(e); b
+  finally c
+>>>
+def g =
+  try a
+  catch
+    case e: Exception => log(e); b
+  finally c
+
 <<< Scala 2 gets braces around a catch's case on its line
 dialect = scala213
 ===

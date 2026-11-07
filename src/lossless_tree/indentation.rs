@@ -11,10 +11,10 @@
 //! - An `end` marker usually sits at the indentation of the definition it
 //!   closes, but Scala also accepts it deeper. Don't move one.
 //!
-//! tree-sitter-scala misparses some valid code inside regions. An infix
-//! operator alone at the end or start of a line (`a getOrElse` / `b`, or
-//! `a` / `||` / `b`) splits one expression into several "statements", and an
-//! `end` marker inside braces can be attached to the wrong construct. The
+//! tree-sitter-scala misparses some valid code inside regions. A line that
+//! continues the one before it (`f` / `(a)`, or `return` / `if c then 1`)
+//! starts a "statement" of its own, and an `end` marker inside braces can be
+//! attached to the wrong construct. The
 //! tree is then wrong about the program, and `check_equivalent` can't catch
 //! a re-indent that changes its meaning. So a formatter should only
 //! re-indent regions where [`SyntaxNode::region_problem`] finds nothing,

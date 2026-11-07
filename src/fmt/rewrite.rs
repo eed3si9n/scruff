@@ -38,8 +38,7 @@
 //! The parents a class extends are separated by commas: `extends A with
 //! B` becomes `extends A, B`, where the dialect allows it, and back. A
 //! `with` that starts a line leaves its comma at the end of the line
-//! before, except inside a body, where in an indentation region
-//! tree-sitter-scala ends the clause at the line's `,`. Not with Scala 2's early definitions, `extends { val x = 1 }
+//! before. Not with Scala 2's early definitions, `extends { val x = 1 }
 //! with A`, which Scala 3 doesn't have, and not in an enum case, where
 //! tree-sitter-scala reads `case C extends E, B` as two cases.
 //!
@@ -330,10 +329,7 @@ fn edits_for(
             SyntaxKind::CallExpression if dialect.fewer_braces => {
                 edits.extend(fewer_braces(tree, node).into_iter().flatten());
             }
-            // tree-sitter-scala reads `{ _: A =>` with the body on the next
-            // lines as `_` called with a colon argument, `A =>`: there's no
-            // call to put braces around.
-            SyntaxKind::ColonArgument if !dialect.fewer_braces && !wildcard_call(node) => {
+            SyntaxKind::ColonArgument if !dialect.fewer_braces => {
                 edits.extend(fewer_braces_back(tree, node).into_iter().flatten());
             }
             SyntaxKind::ArrowRenamedIdentifier if dialect.as_for_import_rename => {
@@ -373,8 +369,7 @@ fn edits_for(
 /// `extends A, B`, or else by `with`, `extends A with B`, or `None` if
 /// there's nothing to change. Not where it mixes the two, has early
 /// definitions, `extends { val x = 1 } with A`, is an enum case's, or has a
-/// `with` that starts a line with comments around it, alone on its line, or
-/// inside a body, where tree-sitter-scala ends the clause at the `,`.
+/// `with` that starts a line with comments around it or alone on its line.
 pub(super) fn extends_separators(
     tree: &Tree,
     clause: SyntaxNode<'_>,
@@ -424,10 +419,8 @@ pub(super) fn extends_separators(
             };
             edits.push((separator.text_range(), format!(" with{space}")));
         } else if before.contains('\n') {
-            // `A` then `with B` on the next line: `A,` then `B`. Not in an
-            // indentation region, or braces that may become one, where
-            // tree-sitter-scala ends the clause at a line ending in `,`.
-            if !blank(before) || !blank(after) || after.contains('\n') || in_body(clause) {
+            // `A` then `with B` on the next line: `A,` then `B`.
+            if !blank(before) || !blank(after) || after.contains('\n') {
                 return None;
             }
             edits.push((TextRange::empty(previous.text_range().end()), ",".into()));
@@ -446,22 +439,6 @@ pub(super) fn extends_separators(
         }
     }
     Some(edits)
-}
-
-/// Whether `node` is inside a body: a block, cases, or a class, enum or
-/// extension body, with or without braces.
-fn in_body(node: SyntaxNode<'_>) -> bool {
-    node.ancestors().skip(1).any(|a| {
-        a.is_indentation_region()
-            || matches!(
-                a.kind(),
-                SyntaxKind::Block
-                    | SyntaxKind::CaseBlock
-                    | SyntaxKind::TemplateBody
-                    | SyntaxKind::EnumBody
-                    | SyntaxKind::WithTemplateBody
-            )
-    })
 }
 
 /// Whether `node` is a compound type, as `A with B`, that becomes an
@@ -1147,15 +1124,6 @@ fn lists_start_width(text: &str, token: SyntaxToken<'_>) -> Option<usize> {
 /// `.` or closing bracket starting the next line goes after the `}`, as
 /// in `}.filter(p)`, and a closing bracket after the body on its line goes
 /// after the `}` too. None if it ends in an end marker.
-/// Whether `argument` is a colon argument to `_`, which is how
-/// tree-sitter-scala reads a lambda's typed wildcard parameter.
-fn wildcard_call(argument: SyntaxNode<'_>) -> bool {
-    argument
-        .parent()
-        .and_then(|call| call.child_by_field_name("function"))
-        .is_some_and(|function| function.kind() == SyntaxKind::Wildcard)
-}
-
 pub(super) fn fewer_braces_back(tree: &Tree, argument: SyntaxNode<'_>) -> Option<Vec<Edit>> {
     let text = tree.syntax().text();
     let colon = previous_code(argument.tokens().find(|t| t.owns_trivia())?)?;
@@ -1624,20 +1592,26 @@ mod tests {
         for source in [
             "object O extends { val x = 1 } with A\n",
             "enum E:\n  case C extends E with B\n",
-            "object O:\n  class C\n      extends A\n      with B:\n    def f = 1\n",
             "object O extends A\n    /* c */ with B\n",
             "trait T extends A, B\n",
             "val a = new A with B\n",
         ] {
             assert_eq!(changed(source, NEW), None, "{source}");
         }
-        // Braces that become a region keep a leading `with`.
+        // Inside a body too, in a region or braces that become one.
+        assert_eq!(
+            rewritten(
+                "object O:\n  class C\n      extends A\n      with B:\n    def f = 1\n",
+                NEW
+            ),
+            "object O:\n  class C\n      extends A,\n      B:\n    def f = 1\n"
+        );
         assert_eq!(
             rewritten(
                 "object O {\n  trait T\n      extends A\n      with B\n}\n",
                 NEW
             ),
-            "object O:\n  trait T\n      extends A\n      with B\n"
+            "object O:\n  trait T\n      extends A,\n      B\n"
         );
         // And back.
         assert_eq!(
