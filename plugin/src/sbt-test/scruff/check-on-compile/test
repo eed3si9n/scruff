@@ -1,6 +1,11 @@
 # Code the default rules accept compiles.
 > compile
 
+# Procedure syntax breaks rule S008, which --fix fixes, so compiling passes.
+$ copy-file proc-C.txt src/main/scala/C.scala
+> compile
+$ must-mirror src/main/scala/C.scala expected/C.scala
+
 # `null` breaks rule S004, so compiling fails, after formatting the file.
 $ copy-file null-B.txt src/main/scala/B.scala
 -> compile

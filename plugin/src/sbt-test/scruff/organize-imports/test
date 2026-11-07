@@ -1,0 +1,8 @@
+# Compiling sorts the imports, since .scruff.toml turns on rule S010.
+$ copy-file unsorted-Main.txt src/main/scala/Main.scala
+> compile
+$ must-mirror src/main/scala/Main.scala expected/Main.scala
+
+# Sorted, they pass as they are.
+> compile
+$ must-mirror src/main/scala/Main.scala expected/Main.scala

@@ -23,7 +23,7 @@ object ScruffPlugin extends AutoPlugin {
       "Whether compiling formats the configuration's sources with scruff first"
     )
     val scruffCheckOnCompile = settingKey[Boolean](
-      "Whether compiling checks the configuration's sources against scruff's lint rules first"
+      "Whether compiling checks the configuration's sources against scruff's lint rules first, fixing what they can"
     )
     val scruffVersion = settingKey[String](
       "The scruff release scruffBinary downloads; by default the version in .scruff.toml"
@@ -40,9 +40,9 @@ object ScruffPlugin extends AutoPlugin {
   @transient
   private val scruffFmtSources = taskKey[Unit]("Formats the configuration's sources with scruff")
 
-  /** Checks the configuration's sources against the lint rules, for
-   *  `compile`, after formatting them, when one has changed since they last
-   *  passed.
+  /** Checks the configuration's sources against the lint rules, fixing
+   *  what they can, for `compile`, after formatting them, when one has
+   *  changed since they last passed.
    */
   @transient
   private val scruffCheckSources = taskKey[Unit](
@@ -190,14 +190,15 @@ object ScruffPlugin extends AutoPlugin {
       }
     }
 
-  /** Runs `binary check` on `dirs` before compiling, failing if a lint rule
-   *  flags anything. A file scruff can't check is only a warning: the
-   *  compiler reports what's wrong with it. Returns whether all passed.
+  /** Runs `binary check --fix` on `dirs` before compiling, fixing what the
+   *  lint rules can and failing if they flag anything left. A file scruff
+   *  can't check is only a warning: the compiler reports what's wrong with
+   *  it. Returns whether all passed.
    */
   def lintSources(binary: File, root: File, dirs: Seq[File], log: Logger): Boolean =
     dirs.isEmpty || {
       val paths = dirs.map(dir => IO.relativize(root, dir).getOrElse(dir.getAbsolutePath))
-      run(binary, root, log, "check", Nil, paths) match {
+      run(binary, root, log, "check", Seq("--fix"), paths) match {
         case 0    => true
         case 1    => throw new MessageOnlyException("scruff's lint rules flagged problems")
         case exit =>

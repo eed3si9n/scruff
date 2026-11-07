@@ -77,7 +77,7 @@ To enable formatting on-compile:
 ThisBuild / scruffFmtOnCompile := true
 ```
 
-To check the lint rules on-compile, after formatting, failing the compile if a rule flags anything:
+To check the lint rules on-compile, after formatting, fixing what they can (as `scruff check --fix`) and failing the compile if a rule flags anything left:
 
 ```scala
 ThisBuild / scruffCheckOnCompile := true
