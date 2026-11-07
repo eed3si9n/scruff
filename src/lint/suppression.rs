@@ -69,6 +69,12 @@ impl Suppressions {
     }
 }
 
+/// Whether `comment` is a `scruff: ignore(...)` that turns `rule` off for
+/// its line.
+pub(super) fn ignores(comment: &str, rule: Rule) -> bool {
+    matches!(parse(comment), Some(Directive::Line(rules)) if rules.contains(&rule))
+}
+
 /// What a suppression comment turns off.
 #[derive(Debug, PartialEq)]
 enum Directive {

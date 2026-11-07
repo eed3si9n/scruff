@@ -174,3 +174,4 @@ The initial of a rule's code is its category: `C` correctness, `S` style.
 | S007                             | `no_xml`               | XML literals and patterns                             | ✓       |     |
 | [S008](S008_procedure_syntax.md) | `procedure_syntax`     | `def f() { ... }` and `def f()` without a result type | ✓       | ✓   |
 | [S009](S009_sbt_0_13_syntax.md)  | `sbt_0_13_syntax`      | sbt 0.13's `key in Scope`                             |         | ✓   |
+| [S010](S010_organize_imports.md) | `organize_imports`     | imports out of order                                  |         | ✓   |

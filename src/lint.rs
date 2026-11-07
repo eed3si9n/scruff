@@ -25,6 +25,7 @@ mod no_return;
 mod no_var;
 mod no_while;
 mod no_xml;
+mod organize_imports;
 mod procedure_syntax;
 mod sbt_0_13_syntax;
 mod suppression;
@@ -93,6 +94,8 @@ pub enum Rule {
     Sbt013Syntax,
     /// `implicit val x = ...`; see `lint/untyped_implicit_val.rs`.
     UntypedImplicitVal,
+    /// Imports out of order; see `lint/organize_imports.rs`.
+    OrganizeImports,
 }
 
 impl Rule {
@@ -107,6 +110,7 @@ impl Rule {
         Rule::NoXml,
         Rule::ProcedureSyntax,
         Rule::Sbt013Syntax,
+        Rule::OrganizeImports,
         Rule::UntypedImplicitVal,
     ];
 
@@ -123,6 +127,7 @@ impl Rule {
             Rule::ProcedureSyntax => "procedure_syntax",
             Rule::Sbt013Syntax => "sbt_0_13_syntax",
             Rule::UntypedImplicitVal => "untyped_implicit_val",
+            Rule::OrganizeImports => "organize_imports",
         }
     }
 
@@ -148,6 +153,8 @@ impl Rule {
             Rule::Sbt013Syntax => false,
             // Scala 3 rejects it.
             Rule::UntypedImplicitVal => true,
+            // A matter of taste, and groups differ between projects.
+            Rule::OrganizeImports => false,
         }
     }
 
@@ -173,6 +180,7 @@ impl Rule {
             Rule::ProcedureSyntax => (Category::Style, 8),
             Rule::Sbt013Syntax => (Category::Style, 9),
             Rule::UntypedImplicitVal => (Category::Correctness, 1),
+            Rule::OrganizeImports => (Category::Style, 10),
         }
     }
 
@@ -204,6 +212,7 @@ impl Rule {
             Rule::ProcedureSyntax => procedure_syntax::SUMMARY,
             Rule::Sbt013Syntax => sbt_0_13_syntax::SUMMARY,
             Rule::UntypedImplicitVal => untyped_implicit_val::SUMMARY,
+            Rule::OrganizeImports => organize_imports::SUMMARY,
         }
     }
 
@@ -220,6 +229,7 @@ impl Rule {
             Rule::ProcedureSyntax => procedure_syntax::MESSAGE,
             Rule::Sbt013Syntax => sbt_0_13_syntax::MESSAGE,
             Rule::UntypedImplicitVal => untyped_implicit_val::MESSAGE,
+            Rule::OrganizeImports => organize_imports::MESSAGE,
         }
     }
 
@@ -238,6 +248,7 @@ impl Rule {
             Rule::ProcedureSyntax => procedure_syntax::check(element),
             Rule::Sbt013Syntax => sbt_0_13_syntax::check(element),
             Rule::UntypedImplicitVal => at(untyped_implicit_val::check(element)),
+            Rule::OrganizeImports => organize_imports::check(element),
         }
     }
 }

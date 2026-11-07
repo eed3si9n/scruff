@@ -17,3 +17,7 @@ additional-css = [
 
 [preprocessor.variables.variables]
 scruff_version = "0.2.2"
+
+[preprocessor.admonish]
+command = "mdbook-admonish"
+assets_version = "3.0.2" # do not edit: managed by `mdbook-admonish install`
