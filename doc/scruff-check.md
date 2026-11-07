@@ -16,14 +16,21 @@ Scruff linter (`check`) is a fast Scala linter. It checks the given files and di
 
 ### Micro benchmark
 
-Using Scalafix 0.14.9 as a reference, Scruff linter runs about 15 to 25x faster, depending on the codebase. For example, here's wall-clock time to check for `null` and `return`, including startup, on a 12-core arm64 machine:
+Using Scalafix 0.14.9 as a reference, Scruff linter runs about 10 to 25x faster, depending on the codebase. For example, here's wall-clock time to check for `null` and `return`, including startup, on a 12-core arm64 machine:
 
 | Codebase                 | Scruff 0.2.2         | Scalafix 0.14.9    |
 | ------------------------ | -------------------- | ------------------ |
 | Cats (52k sloc)          | 0.12 s (433k sloc/s) | 3.1 s (17k sloc/s) |
 | scala/scala3 (207k sloc) | 0.37 s (555k sloc/s) | 6.2 s (34k sloc/s) |
 
-Similar to Scalafmt, the majoriy of the difference might be due to paralleism.
+Here's wall-clock time to organize imports, also on a 12-core arm64 machine:
+
+| Codebase                 | Scruff 0.2.2 `--fix` | Scalafix 0.14.9    |
+| ------------------------ | -------------------- | ------------------ |
+| Cats (52k sloc)          | 0.12 s (433k sloc/s) | 2.7 s (19k sloc/s) |
+| scala/scala3 (207k sloc) | 0.54 s (383k sloc/s) | 5.4 s (38k sloc/s) |
+
+Scalafix's time doesn't include compiling with SemanticDB first, which its `OrganizeImports` needs. Similar to Scalafmt, the majority of the difference might be due to parallelism.
 
 ## Configuration
 
