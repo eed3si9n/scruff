@@ -1,6 +1,6 @@
 # Scruff
 
-Scruff is a lightweight linter and formatter for Scala, built on top of Tree-Sitter Scala, and written in Rust.
+Scruff is an experimental, lightweight linter and formatter for Scala, built on top of Tree-Sitter Scala, and written in Rust.
 
 ## Scruff formatter
 
@@ -10,7 +10,7 @@ Scruff removes all configurations related to styling. See [scruff fmt](scruff-fm
 
 ## Scruff linter
 
-Scruff linter is a fast Scala linter, that can process 400k sloc/s. See [scruff check](scruff-check.md) for more details.
+Scruff linter is an experimental syntactic Scala linter, that can process 400k sloc/s. See [scruff check](scruff-check.md) for more details.
 
 ## License
 

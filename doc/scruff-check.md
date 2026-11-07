@@ -4,7 +4,7 @@
 
 `scruff` `check` \[ _options_ \] \[ _file_ | _dir..._ | `-` \]
 
-Scruff linter (`check`) is a fast Scala linter. It checks the given files and directories against the lint rules, or the current directory when none are given. `-` reads standard input. Files are found as `scruff fmt` finds them, following the same include and exclude paths. Exits with 1 if a rule flags anything, or with `--fix` if anything is left, and with 2 if a file can't be checked because it can't be read or written or has syntax errors.
+Scruff linter (`check`) is an experimental syntactic Scala linter. It checks the given files and directories against the lint rules, or the current directory when none are given. `-` reads standard input. Files are found as `scruff fmt` finds them, following the same include and exclude paths. Exits with 1 if a rule flags anything, or with `--fix` if anything is left, and with 2 if a file can't be checked because it can't be read or written or has syntax errors.
 
 | Option                               | Effect                                                                                                                              |
 | ------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------- |
