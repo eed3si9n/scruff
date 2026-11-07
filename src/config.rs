@@ -324,7 +324,9 @@ impl Config {
                 // Read by tools that install scruff (the GitHub action); the
                 // formatter only checks that it is a string.
                 "version" => {
-                    value.as_str().ok_or("version must be a string, such as \"0.1.0\"")?;
+                    value
+                        .as_str()
+                        .ok_or("version must be a string, such as \"0.1.0\"")?;
                 }
                 "include-paths" => patterns.include_paths = Some(strings()?),
                 "exclude-paths" => patterns.exclude_paths = strings()?,
@@ -1029,7 +1031,10 @@ mod tests {
     fn scruff_toml_dialect() {
         let c = scruff_config("dialect = \"scala213\"").unwrap();
         assert!(!c.dialect_for(None).star_wildcard_import);
-        assert_eq!(scruff_config("").unwrap().dialect_for(None), Dialect::SCALA3);
+        assert_eq!(
+            scruff_config("").unwrap().dialect_for(None),
+            Dialect::SCALA3
+        );
         assert!(scruff_config("dialect = \"scala4\"").is_err());
     }
 

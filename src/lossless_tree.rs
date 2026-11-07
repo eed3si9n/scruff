@@ -11,11 +11,11 @@ use std::sync::OnceLock;
 pub use equivalence::{
     Difference, DifferenceKind, Location, check_equivalent, check_equivalent_trees,
 };
-pub(crate) use scaladoc::scaladoc_lines;
 pub(crate) use equivalence::{
     is_extends_separator, is_implicit_clause_keyword, is_type_wildcard_place,
 };
 pub use indentation::RegionProblem;
+pub(crate) use scaladoc::scaladoc_lines;
 pub use syntax_kind::SyntaxKind;
 pub use text_size::{TextRange, TextSize};
 use tree_sitter::{Language, Parser};
