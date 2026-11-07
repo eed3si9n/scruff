@@ -172,7 +172,7 @@ fn2(
   arg2 = "the quick brown fox jumped over the lazy dog",
 ) { env => println(env) }
 
-<<< Scala 2 keeps a typed wildcard parameter, which tree-sitter-scala reads as a colon argument to `_` (#16)
+<<< Scala 2 keeps a typed wildcard parameter (#16)
 dialect = scala213
 ===
 f { _: Int =>
@@ -182,9 +182,7 @@ forAll { _: IntMarshallingExample =>
     "intUnmarshaller.unmarshalNoError(marshalledValue)" shouldNot compile
 }
 >>>
-f { _: Int =>
-  "x"
-}
+f { _: Int => "x" }
 forAll { _: IntMarshallingExample =>
   "intUnmarshaller.unmarshalNoError(marshalledValue)" shouldNot compile
 }

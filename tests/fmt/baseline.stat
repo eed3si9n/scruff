@@ -27,6 +27,27 @@ class A(x: Int) extends B {
   /* block */ val z = List(1, 2)
 }
 
+<<< scala 2 code using scala 3 keywords as names is unchanged
+dialect = scala213
+===
+object A {
+  def test(given: Int): Int = given
+  val viaCall = given()
+  val enum = 1
+  def f(enum: String) = y.enum
+  val export = enum.f(1)
+  enum = 2
+}
+>>>
+object A {
+  def test(given: Int): Int = given
+  val viaCall = given()
+  val enum = 1
+  def f(enum: String) = y.enum
+  val export = enum.f(1)
+  enum = 2
+}
+
 <<< scala 3 code is unchanged
 enum Color:
   case Red, Green
