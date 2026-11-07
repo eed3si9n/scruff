@@ -119,6 +119,7 @@ fn parse(comment: &str) -> Option<Directive> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::Dialect;
     use crate::lint::{check_tree, fixed, flagged};
     use crate::lossless_tree::parse as parse_tree;
 
@@ -197,7 +198,7 @@ object A:
     fn only_the_rules_named_are_turned_off() {
         let source = "object A:\n  var a: String = null // scruff: ignore(S004)\n";
         let tree = parse_tree(source);
-        let rules: Vec<_> = check_tree(&tree, Rule::ALL)
+        let rules: Vec<_> = check_tree(&tree, Rule::ALL, Dialect::SCALA3)
             .unwrap()
             .iter()
             .map(|d| d.rule)
@@ -213,7 +214,7 @@ object A:
   var b: String = null // scruff: ignore(ALL)
 ";
         let tree = parse_tree(source);
-        assert_eq!(check_tree(&tree, Rule::ALL).unwrap(), []);
+        assert_eq!(check_tree(&tree, Rule::ALL, Dialect::SCALA3).unwrap(), []);
     }
 
     #[test]
@@ -228,7 +229,7 @@ object B:
   val c: String = null
 ";
         let tree = parse_tree(source);
-        let rules: Vec<_> = check_tree(&tree, Rule::ALL)
+        let rules: Vec<_> = check_tree(&tree, Rule::ALL, Dialect::SCALA3)
             .unwrap()
             .iter()
             .map(|d| d.rule)
@@ -245,7 +246,7 @@ object A:
   def f(x: Int = 1) { return }
 ";
         let tree = parse_tree(source);
-        assert_eq!(check_tree(&tree, Rule::ALL).unwrap(), []);
+        assert_eq!(check_tree(&tree, Rule::ALL, Dialect::SCALA3).unwrap(), []);
     }
 
     #[test]

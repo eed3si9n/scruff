@@ -4,7 +4,7 @@
 //! Each rule has a file of its own under `lint/`, with its documentation,
 //! its message, a `check` function that looks at one node or token, and
 //! its tests. `check` gives where the rule flags; a rule that can fix
-//! what it flags gives a [`Finding`] instead, with the edit.
+//! what it flags gives a [`Finding`] instead, with the edits.
 //! This file holds the table of rules: each one's name, code and whether it
 //! runs by default. [`check`] walks the tree once and asks the selected
 //! rules about every node and token.
@@ -18,6 +18,8 @@
 //! To add a rule, add its file, a [`Rule`] variant, and the variant's arm in
 //! each `match` below.
 
+mod finally_close;
+mod imports;
 mod no_asinstanceof;
 mod no_default_param;
 mod no_null;
@@ -33,6 +35,7 @@ mod untyped_implicit_val;
 
 use std::fmt;
 
+use crate::config::Dialect;
 use crate::lossless_tree::{SyntaxElement, SyntaxError, TextRange, TextSize, Tree, parse};
 
 /// What kind of problem a rule finds. Its letter starts the rule's code.
@@ -96,6 +99,8 @@ pub enum Rule {
     UntypedImplicitVal,
     /// Imports out of order; see `lint/organize_imports.rs`.
     OrganizeImports,
+    /// `try { ... } finally x.close()`; see `lint/finally_close.rs`.
+    FinallyClose,
 }
 
 impl Rule {
@@ -111,6 +116,7 @@ impl Rule {
         Rule::ProcedureSyntax,
         Rule::Sbt013Syntax,
         Rule::OrganizeImports,
+        Rule::FinallyClose,
         Rule::UntypedImplicitVal,
     ];
 
@@ -128,6 +134,7 @@ impl Rule {
             Rule::Sbt013Syntax => "sbt_0_13_syntax",
             Rule::UntypedImplicitVal => "untyped_implicit_val",
             Rule::OrganizeImports => "organize_imports",
+            Rule::FinallyClose => "finally_close",
         }
     }
 
@@ -155,6 +162,8 @@ impl Rule {
             Rule::UntypedImplicitVal => true,
             // A matter of taste, and groups differ between projects.
             Rule::OrganizeImports => false,
+            // `Using` needs Scala 2.13.
+            Rule::FinallyClose => false,
         }
     }
 
@@ -181,6 +190,7 @@ impl Rule {
             Rule::Sbt013Syntax => (Category::Style, 9),
             Rule::UntypedImplicitVal => (Category::Correctness, 1),
             Rule::OrganizeImports => (Category::Style, 10),
+            Rule::FinallyClose => (Category::Style, 11),
         }
     }
 
@@ -213,6 +223,7 @@ impl Rule {
             Rule::Sbt013Syntax => sbt_0_13_syntax::SUMMARY,
             Rule::UntypedImplicitVal => untyped_implicit_val::SUMMARY,
             Rule::OrganizeImports => organize_imports::SUMMARY,
+            Rule::FinallyClose => finally_close::SUMMARY,
         }
     }
 
@@ -230,12 +241,13 @@ impl Rule {
             Rule::Sbt013Syntax => sbt_0_13_syntax::MESSAGE,
             Rule::UntypedImplicitVal => untyped_implicit_val::MESSAGE,
             Rule::OrganizeImports => organize_imports::MESSAGE,
+            Rule::FinallyClose => finally_close::MESSAGE,
         }
     }
 
-    /// Where in `element` this rule flags, if anywhere, and the edit that
-    /// fixes it, if the rule can fix it.
-    fn check(self, element: &SyntaxElement<'_>) -> Option<Finding> {
+    /// Where in `element` this rule flags, if anywhere, and the edits that
+    /// fix it, in `dialect`'s syntax, if the rule can fix it.
+    fn check(self, element: &SyntaxElement<'_>, dialect: Dialect) -> Option<Finding> {
         let at = |range: Option<TextRange>| range.map(Finding::at);
         match self {
             Rule::NoReturn => at(no_return::check(element)),
@@ -249,6 +261,7 @@ impl Rule {
             Rule::Sbt013Syntax => sbt_0_13_syntax::check(element),
             Rule::UntypedImplicitVal => at(untyped_implicit_val::check(element)),
             Rule::OrganizeImports => organize_imports::check(element),
+            Rule::FinallyClose => finally_close::check(element, dialect),
         }
     }
 }
@@ -332,8 +345,21 @@ pub struct Diagnostic {
     pub rule: Rule,
     pub range: TextRange,
     pub message: String,
-    /// What `--fix` puts in its place, when the rule can fix it.
-    pub fix: Option<Edit>,
+    /// What `--fix` changes, when the rule can fix it.
+    pub fix: Option<Fix>,
+}
+
+/// The edits that fix one problem, applied together or not at all. Each
+/// is in a range of its own.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Fix {
+    pub edits: Vec<Edit>,
+}
+
+impl From<Edit> for Fix {
+    fn from(edit: Edit) -> Fix {
+        Fix { edits: vec![edit] }
+    }
 }
 
 /// Text to put in place of a range of the source.
@@ -356,8 +382,8 @@ impl Edit {
 /// What a rule's `check` finds in one node or token.
 struct Finding {
     range: TextRange,
-    /// The edit that fixes it, if the rule can fix it.
-    fix: Option<Edit>,
+    /// The edits that fix it, if the rule can fix it.
+    fix: Option<Fix>,
 }
 
 impl Finding {
@@ -389,13 +415,18 @@ impl fmt::Display for LintError {
 
 impl std::error::Error for LintError {}
 
-/// Checks Scala source against `rules`.
-pub fn check(source: &str, rules: &[Rule]) -> Result<Vec<Diagnostic>, LintError> {
-    check_tree(&parse(source), rules)
+/// Checks Scala source against `rules`, with fixes in `dialect`'s syntax.
+pub fn check(source: &str, rules: &[Rule], dialect: Dialect) -> Result<Vec<Diagnostic>, LintError> {
+    check_tree(&parse(source), rules, dialect)
 }
 
-/// Checks a parsed tree against `rules`, reporting in source order.
-pub fn check_tree(tree: &Tree, rules: &[Rule]) -> Result<Vec<Diagnostic>, LintError> {
+/// Checks a parsed tree against `rules`, reporting in source order, with
+/// fixes in `dialect`'s syntax.
+pub fn check_tree(
+    tree: &Tree,
+    rules: &[Rule],
+    dialect: Dialect,
+) -> Result<Vec<Diagnostic>, LintError> {
     // tree-sitter's error recovery can turn code into something else, so a
     // rule could flag what isn't there.
     if !tree.errors().is_empty() {
@@ -405,7 +436,7 @@ pub fn check_tree(tree: &Tree, rules: &[Rule]) -> Result<Vec<Diagnostic>, LintEr
     let mut diagnostics = Vec::new();
     for element in tree.syntax().descendants_with_tokens() {
         for &rule in rules {
-            if let Some(Finding { range, fix }) = rule.check(&element)
+            if let Some(Finding { range, fix }) = rule.check(&element, dialect)
                 && !suppressions.covers(tree.line_col(range.start()).0, rule)
             {
                 diagnostics.push(Diagnostic {
@@ -438,30 +469,50 @@ pub struct Fixed {
 /// another, as when one `in` holds another.
 const FIX_PASSES: usize = 10;
 
-/// Checks `source` against `rules` and fixes what they can, checking again
-/// after each round of edits until none apply. Edits that overlap one
-/// another wait for the next round. A round whose result doesn't parse is
-/// dropped, leaving its problems unfixed.
-pub fn fix(source: &str, rules: &[Rule]) -> Result<Fixed, LintError> {
+/// Checks `source` against `rules` and fixes what they can, in `dialect`'s
+/// syntax, checking again
+/// after each round of edits until none apply. A fix whose edits overlap
+/// another's waits for the next round, but an edit the same as one already
+/// in, as two fixes adding the same import, goes in once. A round whose
+/// result doesn't parse is dropped, leaving its problems unfixed.
+pub fn fix(source: &str, rules: &[Rule], dialect: Dialect) -> Result<Fixed, LintError> {
     let mut source = source.to_string();
     let mut tree = parse(&source);
-    let mut diagnostics = check_tree(&tree, rules)?;
+    let mut diagnostics = check_tree(&tree, rules, dialect)?;
     let mut fixed = 0;
     for _ in 0..FIX_PASSES {
-        let mut edits: Vec<&Edit> = diagnostics.iter().filter_map(|d| d.fix.as_ref()).collect();
-        edits.sort_by_key(|edit| (edit.range.start(), edit.range.end()));
+        let mut fixes: Vec<&Fix> = diagnostics.iter().filter_map(|d| d.fix.as_ref()).collect();
+        let first = |fix: &Fix| {
+            fix.edits
+                .iter()
+                .map(|e| (e.range.start(), e.range.end()))
+                .min()
+        };
+        fixes.sort_by_key(|fix| first(fix));
+        let overlap =
+            |a: &Edit, b: &Edit| a.range.start() < b.range.end() && b.range.start() < a.range.end();
         let mut applied: Vec<&Edit> = Vec::new();
-        for edit in edits {
-            if applied
-                .last()
-                .is_none_or(|last| last.range.end() <= edit.range.start())
+        let mut count = 0;
+        for fix in fixes {
+            let new: Vec<&Edit> = fix
+                .edits
+                .iter()
+                .filter(|edit| !applied.contains(edit))
+                .collect();
+            if new
+                .iter()
+                .all(|edit| applied.iter().all(|done| !overlap(edit, done)))
             {
-                applied.push(edit);
+                applied.extend(new);
+                count += 1;
             }
         }
         if applied.is_empty() {
             break;
         }
+        // Back to front, so each range is still where it was; an insertion
+        // goes before an edit starting at the same place.
+        applied.sort_by_key(|edit| (edit.range.start(), edit.range.end()));
         let mut next = source.clone();
         for edit in applied.iter().rev() {
             next.replace_range(
@@ -470,10 +521,10 @@ pub fn fix(source: &str, rules: &[Rule]) -> Result<Fixed, LintError> {
             );
         }
         let next_tree = parse(&next);
-        let Ok(next_diagnostics) = check_tree(&next_tree, rules) else {
+        let Ok(next_diagnostics) = check_tree(&next_tree, rules, dialect) else {
             break;
         };
-        fixed += applied.len();
+        fixed += count;
         (source, tree, diagnostics) = (next, next_tree, next_diagnostics);
     }
     Ok(Fixed {
@@ -484,12 +535,39 @@ pub fn fix(source: &str, rules: &[Rule]) -> Result<Fixed, LintError> {
     })
 }
 
+/// Where the line holding `offset` starts, for the rules' fixes.
+fn line_start(source: &str, offset: usize) -> usize {
+    source[..offset].rfind('\n').map_or(0, |i| i + 1)
+}
+
+/// Where the line holding `offset` ends, before its `\r\n` or `\n`.
+fn line_end(source: &str, offset: usize) -> usize {
+    let end = source[offset..]
+        .find('\n')
+        .map_or(source.len(), |i| offset + i);
+    end - usize::from(source[..end].ends_with('\r'))
+}
+
+/// The file's line ending, for the lines fixes add.
+fn newline(source: &str) -> &'static str {
+    if source.contains("\r\n") {
+        "\r\n"
+    } else {
+        "\n"
+    }
+}
+
+/// `` `a` `` and `a` are the same name.
+fn name(text: &str) -> String {
+    text.trim_matches('`').to_string()
+}
+
 /// Where `rule` flags `source`, each place as `line:col`, for the rules'
 /// tests.
 #[cfg(test)]
 fn flagged(rule: Rule, source: &str) -> Vec<String> {
     let tree = parse(source);
-    check_tree(&tree, &[rule])
+    check_tree(&tree, &[rule], Dialect::SCALA3)
         .unwrap()
         .iter()
         .map(|d| {
@@ -499,10 +577,16 @@ fn flagged(rule: Rule, source: &str) -> Vec<String> {
         .collect()
 }
 
-/// `source` with `rule`'s fixes in, for the rules' tests.
+/// `source` with `rule`'s fixes in, in Scala 3, for the rules' tests.
 #[cfg(test)]
 fn fixed(rule: Rule, source: &str) -> String {
-    fix(source, &[rule]).unwrap().source
+    fixed_in(rule, source, Dialect::SCALA3)
+}
+
+/// `source` with `rule`'s fixes in, in `dialect`, for the rules' tests.
+#[cfg(test)]
+fn fixed_in(rule: Rule, source: &str, dialect: Dialect) -> String {
+    fix(source, &[rule], dialect).unwrap().source
 }
 
 #[cfg(test)]
@@ -512,7 +596,7 @@ mod tests {
     #[test]
     fn fix_applies_edits_until_none_are_left() {
         let source = "a in Compile := 1\nb in (Compile, console) := 2\nc in core := 3\n";
-        let result = fix(source, &[Rule::Sbt013Syntax, Rule::NoNull]).unwrap();
+        let result = fix(source, &[Rule::Sbt013Syntax, Rule::NoNull], Dialect::SCALA3).unwrap();
         assert_eq!(
             result.source,
             "Compile / a := 1\nCompile / console / b := 2\ncore / c := 3\n"
@@ -524,7 +608,7 @@ mod tests {
     #[test]
     fn fix_leaves_what_it_cannot_fix() {
         let source = "val a = null\nb in Compile := 1\n";
-        let result = fix(source, &[Rule::Sbt013Syntax, Rule::NoNull]).unwrap();
+        let result = fix(source, &[Rule::Sbt013Syntax, Rule::NoNull], Dialect::SCALA3).unwrap();
         assert_eq!(result.source, "val a = null\nCompile / b := 1\n");
         assert_eq!(result.fixed, 1);
         let left: Vec<Rule> = result.diagnostics.iter().map(|d| d.rule).collect();
@@ -620,7 +704,7 @@ mod tests {
     #[test]
     fn rules_report_in_source_order_then_table_order() {
         let tree = parse("object A:\n  var x = 1\n  def f: Int =\n    var y = 2\n    return y\n");
-        let found: Vec<_> = check_tree(&tree, Rule::ALL)
+        let found: Vec<_> = check_tree(&tree, Rule::ALL, Dialect::SCALA3)
             .unwrap()
             .iter()
             .map(|d| (tree.line_col(d.range.start()), d.rule))
@@ -638,7 +722,7 @@ mod tests {
     #[test]
     fn syntax_errors_are_refused() {
         assert!(matches!(
-            check("object A { def f = return", Rule::ALL),
+            check("object A { def f = return", Rule::ALL, Dialect::SCALA3),
             Err(LintError::SyntaxErrors(_))
         ));
     }

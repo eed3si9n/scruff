@@ -12,7 +12,7 @@
 
 use std::cmp::Ordering;
 
-use super::{Edit, Finding, Rule, suppression};
+use super::{Edit, Finding, Fix, Rule, name, suppression};
 use crate::lossless_tree::{
     NodeOrToken, SyntaxElement, SyntaxKind, SyntaxNode, SyntaxTrivia, TextRange, TextSize,
     TriviaKind,
@@ -41,7 +41,7 @@ pub(super) fn check(element: &SyntaxElement<'_>) -> Option<Finding> {
         .find(|&(at, &index)| at != index && !imports[at].ignored)?;
     Some(Finding {
         range: group[at].text_range(),
-        fix: sort_lines(&group, &order),
+        fix: sort_lines(&group, &order).map(Fix::from),
     })
 }
 
@@ -118,14 +118,14 @@ fn sort_lines(group: &[SyntaxNode<'_>], order: &[usize]) -> Option<Edit> {
 }
 
 #[derive(Clone, Copy)]
-enum Direction {
+pub(super) enum Direction {
     Back,
     Forward,
 }
 
 /// The import next to `node` in `direction`, if it's in the same group:
 /// only whitespace without a blank line, comments and `;` between them.
-fn in_group<'t>(node: &SyntaxNode<'t>, direction: Direction) -> Option<SyntaxNode<'t>> {
+pub(super) fn in_group<'t>(node: &SyntaxNode<'t>, direction: Direction) -> Option<SyntaxNode<'t>> {
     let step = |e: &SyntaxElement<'t>| match direction {
         Direction::Back => e.prev_sibling_or_token(),
         Direction::Forward => e.next_sibling_or_token(),
@@ -141,6 +141,17 @@ fn in_group<'t>(node: &SyntaxNode<'t>, direction: Direction) -> Option<SyntaxNod
         element = step(&e);
     }
     None
+}
+
+/// Whether `import a.b.c`, for `path` `["a", "b", "c"]`, sorts before
+/// `import`, as this rule sorts them.
+pub(super) fn sorts_before(path: &[&str], import: &SyntaxNode<'_>) -> bool {
+    let import = Import::new(import);
+    let key: Vec<Vec<Rank>> = path
+        .iter()
+        .map(|chunk| chunk.chars().map(rank).collect())
+        .collect();
+    import.ignored || key < import.key
 }
 
 /// What sorting needs to know about one import.
@@ -263,11 +274,6 @@ fn alias(renamed: &SyntaxNode<'_>) -> Option<String> {
         .child_by_field_name("alias")
         .filter(|a| a.kind() == SyntaxKind::Identifier)
         .map(|a| name(a.text()))
-}
-
-/// `` `a` `` and `a` are the same name.
-fn name(text: &str) -> String {
-    text.trim_matches('`').to_string()
 }
 
 type Rank = (char, Option<char>);

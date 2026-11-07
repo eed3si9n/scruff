@@ -8,7 +8,7 @@ use std::time::Duration;
 use anstyle::{AnsiColor, Style};
 use clap::{Parser, Subcommand, ValueEnum};
 use rayon::prelude::*;
-use scruff::config::{Config, Locator};
+use scruff::config::{Config, Dialect, Locator};
 use scruff::fmt;
 use scruff::lint;
 use scruff::lossless_tree;
@@ -946,8 +946,13 @@ fn lint(
 
     let mut code = 0;
     let outcomes: Vec<Linted> = if files.len() == 1 && stdin(&files[0]) {
-        let rules = match Config::find(Path::new(".")) {
-            Ok(config) => rules_for(config.as_ref()),
+        let (rules, dialect) = match Config::find(Path::new(".")) {
+            Ok(config) => (
+                rules_for(config.as_ref()),
+                config
+                    .as_ref()
+                    .map_or(Dialect::SCALA3, |c| c.dialect_for(None)),
+            ),
             Err(message) => {
                 error(&message.to_string());
                 return ExitCode::from(2);
@@ -965,7 +970,7 @@ fn lint(
                 } else {
                     paints
                 };
-                let (mut linted, fixed) = lint_source(&name, &source, &rules, how, paints);
+                let (mut linted, fixed) = lint_source(&name, &source, &rules, dialect, how, paints);
                 linted.fixed_source = how.fix.then(|| fixed.unwrap_or(source));
                 linted
             }
@@ -996,9 +1001,22 @@ fn lint(
                 Some((_, Err(_))) => Some(Linted::failed(String::new())),
                 Some((_, Ok(config))) if !config.includes(file) => None,
                 Some((_, Ok(config))) => {
-                    Some(lint_file(file, &rules_for(Some(config)), how, paints))
+                    let dialect = config.dialect_for(Some(file));
+                    Some(lint_file(
+                        file,
+                        &rules_for(Some(config)),
+                        dialect,
+                        how,
+                        paints,
+                    ))
                 }
-                None => Some(lint_file(file, &rules_for(None), how, paints)),
+                None => Some(lint_file(
+                    file,
+                    &rules_for(None),
+                    Dialect::SCALA3,
+                    how,
+                    paints,
+                )),
             })
             .collect()
     };
@@ -1093,33 +1111,40 @@ impl Linted {
     }
 }
 
-fn lint_file(file: &Path, rules: &[lint::Rule], how: Linting, paints: Paints) -> Linted {
+fn lint_file(
+    file: &Path,
+    rules: &[lint::Rule],
+    dialect: Dialect,
+    how: Linting,
+    paints: Paints,
+) -> Linted {
     let name = file.strip_prefix(".").unwrap_or(file).display().to_string();
     let source = match std::fs::read_to_string(file) {
         Ok(source) => source,
         Err(err) => return Linted::failed(paints.err.error(&format!("can't read {name}: {err}"))),
     };
-    let (linted, fixed) = lint_source(&name, &source, rules, how, paints);
+    let (linted, fixed) = lint_source(&name, &source, rules, dialect, how, paints);
     match fixed.map(|fixed| std::fs::write(file, fixed)) {
         Some(Err(err)) => Linted::failed(paints.err.error(&format!("can't write {name}: {err}"))),
         _ => linted,
     }
 }
 
-/// Checks `source`, and with `--fix` fixes it, giving the fixed text when
-/// it changed.
+/// Checks `source`, and with `--fix` fixes it in `dialect`'s syntax, giving
+/// the fixed text when it changed.
 fn lint_source(
     name: &str,
     source: &str,
     rules: &[lint::Rule],
+    dialect: Dialect,
     how: Linting,
     paints: Paints,
 ) -> (Linted, Option<String>) {
     let checked = if how.fix {
-        lint::fix(source, rules)
+        lint::fix(source, rules, dialect)
     } else {
         let tree = lossless_tree::parse(source);
-        lint::check_tree(&tree, rules).map(|diagnostics| lint::Fixed {
+        lint::check_tree(&tree, rules, dialect).map(|diagnostics| lint::Fixed {
             source: source.to_string(),
             tree,
             fixed: 0,
@@ -1461,7 +1486,7 @@ mod tests {
     /// Each problem `rule` finds in `source`, shown in full, uncolored.
     fn full(rule: lint::Rule, source: &str) -> String {
         let tree = lossless_tree::parse(source);
-        lint::check_tree(&tree, &[rule])
+        lint::check_tree(&tree, &[rule], Dialect::SCALA3)
             .unwrap()
             .iter()
             .map(|d| full_problem("A.scala", &tree, d, Paint { on: false }))
@@ -1492,7 +1517,7 @@ S001 no_return `return` is not allowed; make the result the last expression
     fn a_problem_in_color_has_the_same_text() {
         let source = "object B {\n  val b = <ul>\n  </ul>\n  val s: String = null\n}\n";
         let tree = lossless_tree::parse(source);
-        for d in lint::check_tree(&tree, lint::Rule::ALL).unwrap() {
+        for d in lint::check_tree(&tree, lint::Rule::ALL, Dialect::SCALA3).unwrap() {
             let colored = full_problem("A.scala", &tree, &d, Paint { on: true });
             assert!(colored.contains('\x1b'));
             assert_eq!(

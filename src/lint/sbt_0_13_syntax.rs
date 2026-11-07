@@ -41,7 +41,7 @@
 //! - [Migrating from sbt 0.13.x](https://www.scala-sbt.org/1.x/docs/Migrating-from-sbt-013x.html)
 //! - [Migrating from sbt 1.x](https://www.scala-sbt.org/2.x/docs/en/changes/migrating-from-sbt-1.x.html)
 
-use super::{Edit, Finding};
+use super::{Edit, Finding, Fix};
 use crate::lossless_tree::{SyntaxElement, SyntaxKind, SyntaxNode, TextRange};
 
 /// What the rule flags, for `scruff check --help`.
@@ -60,7 +60,7 @@ pub(super) fn check(element: &SyntaxElement<'_>) -> Option<Finding> {
     }
     Some(Finding {
         range: scoping.in_range,
-        fix: slash_syntax(node, scoping),
+        fix: slash_syntax(node, scoping).map(Fix::from),
     })
 }
 

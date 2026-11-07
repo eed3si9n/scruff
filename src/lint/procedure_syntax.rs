@@ -38,7 +38,7 @@
 //!
 //! - [Dropped: Procedure Syntax](https://docs.scala-lang.org/scala3/reference/dropped-features/procedure-syntax.html)
 
-use super::{Edit, Finding};
+use super::{Edit, Finding, Fix};
 use crate::lossless_tree::{NodeOrToken, SyntaxElement, SyntaxKind, SyntaxNode};
 
 /// What the rule flags, for `scruff check --help`.
@@ -78,7 +78,7 @@ pub(super) fn check(element: &SyntaxElement<'_>) -> Option<Finding> {
     }
     Some(Finding {
         range: name.text_range(),
-        fix: fix(node),
+        fix: fix(node).map(Fix::from),
     })
 }
 
