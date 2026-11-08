@@ -321,16 +321,19 @@ fn max_column_comes_from_the_config() {
     let dir = project("max_column");
     std::fs::write(dir.join(".scalafmt.conf"), "maxColumn = 20\n").unwrap();
     std::fs::create_dir_all(dir.join("src")).unwrap();
-    std::fs::write(dir.join("src/A.scala"), "val x = f(alpha, beta)\n").unwrap();
+    std::fs::write(dir.join("src/A.scala"), "val x = f(alpha, beta, gamma)\n").unwrap();
     let out = scruff_in(&dir, &["format", "src/A.scala"], "");
     assert!(out.status.success(), "{}", text(&out.stderr));
     assert_eq!(
         std::fs::read_to_string(dir.join("src/A.scala")).unwrap(),
-        "val x = f(\n  alpha,\n  beta,\n)\n"
+        "val x = f(\n  alpha,\n  beta,\n  gamma,\n)\n"
     );
     // Standard input follows the config for the current directory.
-    let out = scruff_in(&dir, &["format", "-"], "val x = f(alpha, beta)\n");
-    assert_eq!(text(&out.stdout), "val x = f(\n  alpha,\n  beta,\n)\n");
+    let out = scruff_in(&dir, &["format", "-"], "val x = f(alpha, beta, gamma)\n");
+    assert_eq!(
+        text(&out.stdout),
+        "val x = f(\n  alpha,\n  beta,\n  gamma,\n)\n"
+    );
 }
 
 #[test]
@@ -356,12 +359,12 @@ fn scruff_toml_comes_before_scalafmt_conf() {
     let dir = project("scruff_toml");
     std::fs::write(dir.join(".scalafmt.conf"), "maxColumn = 100\n").unwrap();
     std::fs::write(dir.join(".scruff.toml"), "max-column = 20\n").unwrap();
-    std::fs::write(dir.join("A.scala"), "val x = f(alpha, beta)\n").unwrap();
+    std::fs::write(dir.join("A.scala"), "val x = f(alpha, beta, gamma)\n").unwrap();
     let out = scruff_in(&dir, &["format", "A.scala"], "");
     assert!(out.status.success(), "{}", text(&out.stderr));
     assert_eq!(
         std::fs::read_to_string(dir.join("A.scala")).unwrap(),
-        "val x = f(\n  alpha,\n  beta,\n)\n"
+        "val x = f(\n  alpha,\n  beta,\n  gamma,\n)\n"
     );
 }
 

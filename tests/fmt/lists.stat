@@ -9,13 +9,31 @@ val x = f(alpha, beta, gamma)
 val x = f(alpha, beta, gamma)
 
 <<< arguments that don't fit go one per line
-val x = compute(alpha, beta, gamma, delta)
+val x = compute(alpha, beta, gamma, delta, epsilon)
 >>>
 val x = compute(
   alpha,
   beta,
   gamma,
   delta,
+  epsilon,
+)
+
+<<< a call that fits on the line after the `=` goes there whole
+val x = compute(alpha, beta, gamma, delta)
+def eval(expression: String): Result =
+  eval(expression, noImports, srcName)
+>>>
+val x =
+  compute(alpha, beta, gamma, delta)
+def eval(expression: String): Result =
+  eval(expression, noImports, srcName)
+
+<<< a call that takes a lambda stays on the `=`'s line
+val ys = xs.map(x => transform(x, alpha1))
+>>>
+val ys = xs.map(x =>
+  transform(x, alpha1)
 )
 
 <<< parameters indent four spaces
@@ -42,12 +60,13 @@ def run(alpha: Int)(
 ): Unit = ()
 
 <<< an inner list breaks only if it doesn't fit on its own line
-val x = outer(inner(alpha, beta), gamma1)
+val x = outer(inner(alpha, beta), gamma1, delta1)
 val y = outer(inner(alpha, beta, gamma, delta, epsilon))
 >>>
 val x = outer(
   inner(alpha, beta),
   gamma1,
+  delta1,
 )
 val y = outer(
   inner(
@@ -218,7 +237,7 @@ type T[X,] = X
 
 <<< inside a Scala 3 indentation region
 def f =
-  val x = compute(alpha, beta, gamma, delta)
+  val x = compute(alpha, beta, gamma, delta, epsilon)
   x
 >>>
 def f =
@@ -227,6 +246,7 @@ def f =
     beta,
     gamma,
     delta,
+    epsilon,
   )
   x
 
@@ -260,10 +280,10 @@ val ys = transform(
 )
 
 <<< a placeholder function is not a lambda
-val ys = xs.map(_ + somethingVeryLong12345)
+val ys = xs.map(_ + somethingVeryLong1234567890)
 >>>
 val ys = xs.map(
-  _ + somethingVeryLong12345
+  _ + somethingVeryLong1234567890
 )
 
 <<< the body breaks further when it still doesn't fit

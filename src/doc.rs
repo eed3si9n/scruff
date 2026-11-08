@@ -117,6 +117,11 @@ pub enum FirstLine {
     /// What's before its first place to break, as `f(`: a call breaks its
     /// arguments sooner than start the next line.
     ToBreak,
+    /// All of it, with its groups flat, on its line or else on the next:
+    /// a call of plain arguments, as `f(a, b)`, starts the next line
+    /// sooner than break them. If it fits on neither, as
+    /// [`FirstLine::ToBreak`].
+    Whole,
 }
 
 /// How far the lines inside a [`Doc::StartsPast`] move: levels of
@@ -650,14 +655,30 @@ pub fn print(doc: &Doc<'_>, options: &PrintOptions) -> String {
                 let start = column + flat.flat_width().unwrap_or(0);
                 let past = start > width(line_indentation(&out)).saturating_add(*limit);
                 let room = options.max_width as isize - start as isize;
+                let head_fits = || {
+                    let head = Command {
+                        mode: Mode::Break,
+                        ..part(body)
+                    };
+                    fits(head, &commands, room)
+                };
                 let fits = match first_line {
                     FirstLine::Flat => first_line_fits(body, room),
-                    FirstLine::ToBreak => {
-                        let head = Command {
-                            mode: Mode::Break,
+                    FirstLine::ToBreak => head_fits(),
+                    FirstLine::Whole => {
+                        let flat = Command {
+                            mode: Mode::Flat,
                             ..part(body)
                         };
-                        fits(head, &commands, room)
+                        // Where it would start on the next line.
+                        let next_indent = (line_indent as isize
+                            + broken_shift.levels * indent_width as isize
+                            + broken_shift.columns)
+                            .max(0) as usize;
+                        let next_room = line_start_after(broken, next_indent, indent_width)
+                            .map_or(-1, |start| options.max_width as isize - start as isize);
+                        fits(flat, &commands, room)
+                            || !fits(flat, &commands, next_room) && head_fits()
                     }
                 };
                 let (before, shift) = if past || !fits {
@@ -1181,6 +1202,30 @@ mod tests {
             );
         assert_eq!(at(20, &doc), "val a = f(\n  alpha, beta\n)");
         assert_eq!(at(80, &doc), "val a = f(alpha, beta)");
+    }
+
+    #[test]
+    fn starts_past_whole_starts_the_next_line_sooner_than_break_the_call() {
+        let args = (Doc::softline() + t("alpha, beta")).nest() + Doc::softline();
+        let call = (t("f(") + args + t(")")).group();
+        let doc = t("val a =")
+            + Doc::starts_past(
+                usize::MAX,
+                (
+                    Doc::hardline(),
+                    Shift {
+                        levels: 1,
+                        columns: 0,
+                    },
+                ),
+                (t(" "), Shift::default()),
+                call,
+                FirstLine::Whole,
+            );
+        assert_eq!(at(80, &doc), "val a = f(alpha, beta)");
+        assert_eq!(at(20, &doc), "val a =\n  f(alpha, beta)");
+        // Fitting on neither line, it breaks the call after all.
+        assert_eq!(at(15, &doc), "val a = f(\n  alpha, beta\n)");
     }
 
     #[test]

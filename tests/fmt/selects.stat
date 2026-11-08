@@ -42,19 +42,20 @@ val ys = xs.asInstanceOf[List[Int]]
   .filter(g)
 
 <<< a head that is a call keeps its arguments
-val r = compute(alpha).map(f).filter(g1234)
+val r = compute(alpha).map(f).filter(g123456789)
 >>>
 val r = compute(alpha)
   .map(f)
-  .filter(g1234)
+  .filter(g123456789)
 
 <<< one call is not a chain; its arguments break instead
-val ys = Generator.string(alpha, beta, gamma1)
+val ys = Generator.string(alpha, beta, gamma1, d)
 >>>
 val ys = Generator.string(
   alpha,
   beta,
   gamma1,
+  d,
 )
 
 <<< a block argument in a chain
@@ -99,25 +100,25 @@ val zs = sys.env.get(k).map(f)
 
 <<< the source's line breaks don't matter: these come out the same
 val ys = xs.map(transform).filter(good)
-  .take(n)
+  .take(n1)
 val ys = xs
-  .map(transform).filter(good).take(n)
+  .map(transform).filter(good).take(n1)
 val ys = xs.map(transform)
   .filter(good)
-  .take(n)
+  .take(n1)
 >>>
 val ys = xs
   .map(transform)
   .filter(good)
-  .take(n)
+  .take(n1)
 val ys = xs
   .map(transform)
   .filter(good)
-  .take(n)
+  .take(n1)
 val ys = xs
   .map(transform)
   .filter(good)
-  .take(n)
+  .take(n1)
 
 <<< a chain with a part over several lines keeps its line breaks
 dialect = scala213

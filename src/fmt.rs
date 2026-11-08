@@ -881,15 +881,17 @@ impl<'t> Formatter<'t> {
     /// Columns past its line's indentation, at most, where a definition's
     /// body starts on the `=`'s line, and what of it must fit there: for a
     /// `match`, its first line; for a call, its head, as `f(`, with no
-    /// limit for one on one line. Other control structures always start the
-    /// next line.
+    /// limit for one on one line, but for one of plain arguments, all of
+    /// it, on that line or the next, before its head. Other control
+    /// structures always start the next line.
     fn body_start(&self, body: SyntaxNode<'t>) -> (usize, FirstLine) {
         match body.kind() {
             SyntaxKind::MatchExpression => (self.style.max_body_start, FirstLine::Flat),
             SyntaxKind::CallExpression if self.has_statement_lines(body) => {
                 (self.style.max_body_start, FirstLine::ToBreak)
             }
-            SyntaxKind::CallExpression => (usize::MAX, FirstLine::ToBreak),
+            SyntaxKind::CallExpression if takes_lambda(body) => (usize::MAX, FirstLine::ToBreak),
+            SyntaxKind::CallExpression => (usize::MAX, FirstLine::Whole),
             _ => (0, FirstLine::Flat),
         }
     }
@@ -2531,6 +2533,31 @@ fn is_named_argument(node: SyntaxNode<'_>) -> bool {
             .is_some_and(|op| is_assignment_operator(op.text())),
         _ => false,
     }
+}
+
+/// Whether a call, or one before it in a chain, as `f(a)(b => b)` or
+/// `xs.map { x => x }.toList`, takes a lambda or a block: `f(x => x)`,
+/// `xs.map { x => x }` or `f: x => x`.
+fn takes_lambda(call: SyntaxNode<'_>) -> bool {
+    std::iter::successors(Some(call), |c| {
+        let field = match c.kind() {
+            SyntaxKind::CallExpression | SyntaxKind::GenericFunction => "function",
+            SyntaxKind::FieldExpression => "value",
+            _ => return None,
+        };
+        c.child_by_field_name(field)?.into_node()
+    })
+    .filter(|c| c.kind() == SyntaxKind::CallExpression)
+    .any(|c| {
+        c.child_by_field_name("arguments")
+            .and_then(|a| a.into_node())
+            .is_some_and(|args| match args.kind() {
+                SyntaxKind::Arguments => args
+                    .non_trivia_children()
+                    .any(|a| a.kind() == SyntaxKind::LambdaExpression),
+                _ => true,
+            })
+    })
 }
 
 /// An assignment operator, such as `+=` or `:=`, and not `==`, `<=`, `>=`
