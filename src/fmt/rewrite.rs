@@ -181,6 +181,18 @@ fn original_offset(edits: &[&Edit], offset: TextSize) -> TextSize {
     TextSize::from(u32::try_from(offset - shift).unwrap_or(0))
 }
 
+/// Whether an edit at `range` changes code copied verbatim: it overlaps a
+/// verbatim range, or inserts strictly inside one.
+fn in_verbatim(tree: &Tree, range: TextRange) -> bool {
+    tree.verbatim_ranges().iter().any(|v| {
+        if range.is_empty() {
+            v.range.start() < range.start() && range.start() < v.range.end()
+        } else {
+            v.range.intersect(range).is_some_and(|r| !r.is_empty())
+        }
+    })
+}
+
 /// Every construct's edits for `dialect`.
 fn units(tree: &Tree, dialect: Dialect) -> Vec<Unit> {
     let text = tree.syntax().text();
@@ -188,7 +200,9 @@ fn units(tree: &Tree, dialect: Dialect) -> Vec<Unit> {
     for node in tree.syntax().descendants() {
         let mut edits = Vec::new();
         edits_for(tree, text, dialect, node, &mut edits);
-        if !edits.is_empty() {
+        // All or nothing: a construct with an edit in code copied verbatim,
+        // such as a `format: off` block, is left as written.
+        if !edits.is_empty() && !edits.iter().any(|(range, _)| in_verbatim(tree, *range)) {
             let range = edits
                 .iter()
                 .fold(node.text_range(), |range, (edit, _)| range.cover(*edit));
@@ -2047,5 +2061,29 @@ mod tests {
             rewritten(source, NEW),
             "// format: off\nimport a._\n// format: on\nimport b.*\n"
         );
+    }
+
+    #[test]
+    fn format_off_keeps_braces() {
+        // Each one's braces would go, or come back, outside `format: off`.
+        let unchanged = [
+            ("lazy val a = p.settings(f {\n  x\n})\n", NEW),
+            ("xs.foreach {\n  x\n}\n", NEW),
+            ("def f = {\n  a\n  b\n}\n", NEW),
+            ("object A {\n  val a = 1\n}\n", NEW),
+            ("xs.foreach:\n  x\n", OLD),
+            ("def f =\n  a\n  b\n", OLD),
+        ];
+        for (code, dialect) in unchanged {
+            assert_ne!(rewritten(code, dialect), code, "{code}");
+            let source = format!("// format: off\n{code}// format: on\nval b = 1\n");
+            assert_eq!(rewritten(&source, dialect), source, "{code}");
+        }
+    }
+
+    #[test]
+    fn braces_half_in_format_off_stay() {
+        let source = "def f = {\n  a\n  // format: off\n  b\n}\n";
+        assert_eq!(rewritten(source, NEW), source);
     }
 }
