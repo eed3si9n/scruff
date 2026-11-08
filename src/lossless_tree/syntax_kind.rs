@@ -353,7 +353,10 @@ mod codegen {
             "/src/lossless_tree/syntax_kind/generated.rs"
         );
         let expected = generate();
-        let actual = std::fs::read_to_string(path).unwrap_or_default();
+        // A Windows checkout may have turned its line endings into `\r\n`.
+        let actual = std::fs::read_to_string(path)
+            .unwrap_or_default()
+            .replace("\r\n", "\n");
         if actual == expected {
             return;
         }

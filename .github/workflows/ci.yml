@@ -68,14 +68,14 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
     steps:
-      # Keep LF endings so the .stat fixtures match on Windows.
-      - run: git config --global core.autocrlf false
       # Submodules (corpora/) are skipped: tests that use them skip when absent.
       - uses: actions/checkout@v7
 
       # Runs the defaults, `scruff format --check` and `scruff check`, on this repo.
       # - name: check Scala code format and lint
-      - uses: ./
+      # Skipped on Windows until a release keeps CRLF line endings.
+      - if: runner.os != 'Windows'
+        uses: ./
       - if: needs.changes.outputs.rust == 'true'
         uses: dtolnay/rust-toolchain@stable
       - if: needs.changes.outputs.rust == 'true'

@@ -66,8 +66,24 @@ impl fmt::Display for FormatError {
 impl std::error::Error for FormatError {}
 
 /// Formats Scala source.
+///
+/// A file whose lines all end in `\r\n`, as Git checks files out on Windows
+/// by default, is formatted as its `\n` twin and keeps its `\r\n`. The round
+/// trip is exact, so a string's line endings stay as written. Any other
+/// file's line breaks become `\n`.
 pub fn format(source: &str, options: &FormatOptions) -> Result<String, FormatError> {
-    format_with(source, options, Rules::Structural, STYLE)
+    if !is_crlf(source) {
+        return format_with(source, options, Rules::Structural, STYLE);
+    }
+    let lf = source.replace("\r\n", "\n");
+    let formatted = format_with(&lf, options, Rules::Structural, STYLE)?;
+    Ok(formatted.replace('\n', "\r\n"))
+}
+
+/// Whether `source` has line breaks, all of them `\r\n`.
+fn is_crlf(source: &str) -> bool {
+    let newlines = source.matches('\n').count();
+    newlines > 0 && source.matches("\r\n").count() == newlines
 }
 
 /// Which rules build the document.
@@ -2766,14 +2782,28 @@ mod tests {
     }
 
     #[test]
-    fn lines_end_in_newline() {
-        let crlf = "object A {\r\n  val x = 1\r\n}\r\n";
+    fn crlf_files_keep_crlf() {
+        let crlf = "object A {\r\n  val x =   1\r\n}\r\n";
         assert_eq!(
             format(crlf, &scala2()).unwrap(),
+            "object A {\r\n  val x = 1\r\n}\r\n"
+        );
+        // Formatted as the LF file is, Scaladoc too.
+        let doc = "/**\n   * a\n   */\nobject A {\n  val s = \"\"\"x\n  y\"\"\"\n}\n";
+        let lf = format(doc, &scala2()).unwrap();
+        let crlf = format(&doc.replace('\n', "\r\n"), &scala2()).unwrap();
+        assert_eq!(crlf, lf.replace('\n', "\r\n"));
+    }
+
+    #[test]
+    fn mixed_line_endings_become_newline() {
+        let mixed = "object A {\r\n  val x = 1\n}\r\n";
+        assert_eq!(
+            format(mixed, &scala2()).unwrap(),
             "object A {\n  val x = 1\n}\n"
         );
         // Inside a string, a line ending is part of the value and stays.
-        let string = "val s = \"\"\"a\r\nb\"\"\"\r\n";
+        let string = "val s = \"\"\"a\r\nb\"\"\"\n";
         assert_eq!(fmt(string), "val s = \"\"\"a\r\nb\"\"\"\n");
     }
 
