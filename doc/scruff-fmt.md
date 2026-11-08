@@ -8,8 +8,8 @@ Formats the given files and directories in place, or the current directory when 
 
 | Option                        | Effect                                                                                      |
 | ----------------------------- | ------------------------------------------------------------------------------------------- |
-| `--check`                     | Write nothing; show how each file would change, and exit with 1 if any would                |
-| `--diff`                      | Write nothing; print a unified diff of each change, and exit with 1 if any would            |
+| `--check`                     | Write nothing; show how each file would change, and exit with `1` if any would              |
+| `--diff`                      | Write nothing; print a unified diff of each change, and exit with `1` if any would          |
 | `-q`, `--quiet`               | Print only the diffs: no file count, no warnings, errors only with `--check`                |
 | `-s`, `--silent`              | Print nothing but the formatted text or the diff; errors show only in the exit code         |
 | <nobr>`--color` _when_</nobr> | `auto` (default), `always` or `never`; `auto` colors on a terminal unless `NO_COLOR` is set |
@@ -67,11 +67,12 @@ This means that Scruff would be 3 ~ 10x faster on CI, depending on how Scalafmt 
 
 ### Philosophy: lunch A or lunch B
 
-Scruff 0.1.0 offers minimal configurations:
+scruff fmt offers minimal configurations:
 
 ```toml
 # .scruff.toml
 
+version = "{{scruff_version}}"
 max-column = 100
 dialect = "scala3"
 
@@ -84,3 +85,13 @@ exclude-paths = [
 - `dialect = "scala213"` or `dialect = "scala213source3"` rewrites to curly-braces.
 
 There are no other knobs.
+
+## Format suppression
+
+Scruff formatter supports `// format: off` and `// format: on` comments. For example, here's how we can suppress the formatter for the entire file:
+
+```scala
+// format: off
+
+ThisBuild / version := "0.4.0-SNAPSHOT"
+```

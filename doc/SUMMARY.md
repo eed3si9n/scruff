@@ -4,6 +4,7 @@
 
 - [Setup](setup.md)
 - [scruff fmt](scruff-fmt.md)
+  - [The Scruff style](scruff-style.md)
 - [scruff check](scruff-check.md)
   - [S008 procedure_syntax](S008_procedure_syntax.md)
   - [S009 sbt_0_13_syntax](S009_sbt_0_13_syntax.md)
