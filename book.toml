@@ -16,7 +16,7 @@ additional-css = [
 [preprocessor.variables]
 
 [preprocessor.variables.variables]
-scruff_version = "0.2.2"
+scruff_version = "0.3.3"
 
 [preprocessor.admonish]
 command = "mdbook-admonish"

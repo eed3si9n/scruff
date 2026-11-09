@@ -6,7 +6,7 @@ This document describes the current formatting style.
 
 ## How Scruff wraps lines
 
-Scruff ignores previous formatting, and applies uniform horizontal whitespace to your code based on max-column (default `100`). Scruff uses `2` whitespace for indentation, like most Scala styles.
+Scruff ignores previous formatting, and applies uniform horizontal whitespace to your code based on max-column (default `100`). Scruff uses `2` whitespaces for indentation, like most Scala styles.
 
 ### Short expressions
 

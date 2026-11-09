@@ -53,7 +53,7 @@ For convenience, We've also created an sbt plugin that adds `scruff`, `scruffFmt
 
 ```scala
 // project/plugins.sbt
-addSbtPlugin("com.eed3si9n" % "sbt-scruff" % "0.2.2")
+addSbtPlugin("com.eed3si9n" % "sbt-scruff" % "0.3.0")
 ```
 
 The first time you call `scruffFmt`, it will download the binary:
