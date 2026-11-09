@@ -345,10 +345,10 @@ fn compute(tree: &Tree, relaid: &Relaid) -> Option<Layout> {
         let Some(indent) = statement_indent(container) else {
             continue;
         };
-        // The lines a container owns sit deeper than its opener's line; at
-        // the same width only for cases written at their `match`'s width.
-        // Anything else means tree-sitter-scala read the layout differently
-        // from scalac, as a leading `||` taken into the last case.
+        // Cases sit deeper than their `match`'s line, or at its width: any
+        // shallower means tree-sitter-scala read the layout differently from
+        // scalac, as a leading `||` taken into the last case. Other bodies
+        // may be written at any column, and are moved in.
         let mut floor = 0;
         let target = match container.opener {
             None => 0,
@@ -367,7 +367,9 @@ fn compute(tree: &Tree, relaid: &Relaid) -> Option<Layout> {
                 } else {
                     STEP
                 };
-                floor = lines[line].width + step;
+                if container.cases {
+                    floor = lines[line].width + step;
+                }
                 deeper[index] = step > 0;
                 width as usize + step
             }

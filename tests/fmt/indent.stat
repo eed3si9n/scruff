@@ -321,3 +321,33 @@ object A {
         report.error(em"Separation failure: a description of the failure, sized to fit on its", pos)
   }
 }
+
+<<< statements at the opener's indentation move in
+object A {
+def foo: Int = 1
+}
+>>>
+object A:
+  def foo: Int = 1
+
+<<< nested statements at the opener's indentation move in
+object A {
+def foo = {
+bar
+}
+}
+>>>
+object A:
+  def foo =
+    bar
+
+<<< statements shallower than the opener's line move in
+object A {
+  object B {
+def foo: Int = 1
+  }
+}
+>>>
+object A:
+  object B:
+    def foo: Int = 1
