@@ -114,16 +114,19 @@ def f =
     d
     e
   }
+
 def g =
   while (c) {
     x
     y
   }
+
 def h =
   for (x <- xs) {
     f(x)
     g(x)
   }
+
 def i =
   for {
     x <- xs
@@ -160,6 +163,7 @@ def g =
 def f =
   if c then a
   else b
+
 def g =
   if c then
     aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa

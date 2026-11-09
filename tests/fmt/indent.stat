@@ -150,6 +150,7 @@ object A {
     val y = x + 1
     y * 2
   }
+
   def g = 1
 }
 

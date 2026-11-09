@@ -105,6 +105,32 @@ pub enum Doc<'a> {
     /// line breaks: at its last block, which the marker closes as a `}`
     /// would, so `end if` doesn't follow a short `else`. Prints nothing.
     CountFrom,
+    /// Opens a statement's frame for [`Doc::BlankAnchor`], [`Doc::BlankStart`]
+    /// and [`Doc::BlankEnd`]: the printer gives the statement `always` blank
+    /// lines above it, or `when_long` if it printed over at least
+    /// `min_breaks` line breaks, or `after_long` if the statement before it
+    /// did, whichever is most, counting those already there. Only the
+    /// printer knows how long a statement is. Prints nothing.
+    BlankLines {
+        id: u32,
+        always: usize,
+        when_long: usize,
+        /// Blank lines, at least, if the statement before it, a val, var or
+        /// def, printed over `min_breaks` line breaks.
+        after_long: usize,
+        /// Whether this statement is a val, var or def.
+        binding: bool,
+        min_breaks: usize,
+    },
+    /// Where the blank lines go: at the start of the line after the line
+    /// break that ends the line above. Prints nothing.
+    BlankAnchor,
+    /// Where the statement starts counting line breaks: after its leading
+    /// comments. Prints nothing.
+    BlankStart,
+    /// Closes the frame of [`Doc::BlankLines`] with the same `id`, and adds
+    /// the blank lines the statement needs. Prints nothing.
+    BlankEnd { id: u32 },
 }
 
 /// What of a [`Doc::StartsPast`] body must fit on its line.
@@ -291,6 +317,7 @@ impl<'a> Doc<'a> {
         fn walk(doc: &Doc<'_>, width: &mut usize) -> bool {
             match doc {
                 Doc::Nil | Doc::LineSuffix(_) | Doc::BreakParent | Doc::CountFrom => false,
+                Doc::BlankLines { .. } | Doc::BlankAnchor | Doc::BlankStart | Doc::BlankEnd { .. } => false,
                 Doc::Text(text) => {
                     *width += self::width(text);
                     false
@@ -342,6 +369,9 @@ impl<'a> Doc<'a> {
         match self {
             Doc::LineSuffix(inner) if suffixes => inner.flat_width_counting(true),
             Doc::Nil | Doc::LineSuffix(_) | Doc::CountFrom => Some(0),
+            Doc::BlankLines { .. } | Doc::BlankAnchor | Doc::BlankStart | Doc::BlankEnd { .. } => {
+                Some(0)
+            }
             Doc::Text(text) => Some(width(text)),
             Doc::Verbatim(text) | Doc::Relative { text, .. } if text.contains(['\n', '\r']) => None,
             Doc::Verbatim(text) | Doc::Relative { text, .. } => Some(width(text)),
@@ -461,6 +491,22 @@ enum Item<'d, 'a> {
     },
 }
 
+/// A statement that may get blank lines above it, while it is printed.
+#[derive(Clone)]
+struct BlankFrame {
+    id: u32,
+    always: usize,
+    when_long: usize,
+    /// Already zero unless the statement before it was a long binding.
+    after_long: usize,
+    binding: bool,
+    min_breaks: usize,
+    /// Where the blank lines go, once the line above has ended.
+    anchor: Option<usize>,
+    /// The line breaks printed when the statement itself started.
+    since: usize,
+}
+
 /// The line break before a [`Doc::EndMarker`]'s marker.
 static HARD_LINE: Doc<'static> = Doc::Line(LineKind::Hard);
 
@@ -501,6 +547,11 @@ pub fn print(doc: &Doc<'_>, options: &PrintOptions) -> String {
     // innermost last, how many there were when it started counting.
     let mut breaks = 0;
     let mut counting_since: Vec<usize> = Vec::new();
+    // The statements being printed that may get blank lines above them.
+    let mut blank_frames: Vec<BlankFrame> = Vec::new();
+    // For each depth of them, whether the last statement closed there was a
+    // val, var or def that printed long.
+    let mut closed_long: Vec<bool> = Vec::new();
 
     while let Some(command) = commands.pop() {
         let Command {
@@ -622,6 +673,73 @@ pub fn print(doc: &Doc<'_>, options: &PrintOptions) -> String {
             Doc::CountFrom => {
                 if let Some(since) = counting_since.last_mut() {
                     *since = breaks;
+                }
+            }
+            Doc::BlankLines {
+                id,
+                always,
+                when_long,
+                after_long,
+                binding,
+                min_breaks,
+            } => {
+                // The statement before this one at this depth, if it was a
+                // long binding. Later and deeper ones are stale.
+                let depth = blank_frames.len();
+                let previous_long = closed_long.get(depth).copied().unwrap_or(false);
+                closed_long.truncate(depth);
+                blank_frames.push(BlankFrame {
+                    id: *id,
+                    always: *always,
+                    when_long: *when_long,
+                    after_long: if previous_long { *after_long } else { 0 },
+                    binding: *binding,
+                    min_breaks: *min_breaks,
+                    anchor: None,
+                    since: breaks,
+                });
+            }
+            Doc::BlankAnchor => {
+                if let Some(frame) = blank_frames.last_mut()
+                    && frame.anchor.is_none()
+                {
+                    frame.anchor = Some(out.rfind('\n').map_or(0, |i| i + 1));
+                }
+            }
+            Doc::BlankStart => {
+                if let Some(frame) = blank_frames.last_mut() {
+                    frame.since = breaks;
+                }
+            }
+            Doc::BlankEnd { id } => {
+                // Frames opened inside it that never closed go with it.
+                if let Some(i) = blank_frames.iter().rposition(|f| f.id == *id) {
+                    let frame = blank_frames[i].clone();
+                    blank_frames.truncate(i);
+                    let long = breaks - frame.since >= frame.min_breaks;
+                    closed_long.resize(i, false);
+                    closed_long.push(frame.binding && long);
+                    let need = frame
+                        .always
+                        .max(if long { frame.when_long } else { 0 })
+                        .max(frame.after_long);
+                    if let Some(at) = frame.anchor.filter(|_| need > 0) {
+                        // The blank lines there already: line breaks the
+                        // gap printed, whose indentation was trimmed.
+                        let ending = options.line_ending.as_str();
+                        let mut have = 0;
+                        while out[at + have * ending.len()..].starts_with(ending) {
+                            have += 1;
+                        }
+                        if have < need {
+                            let more = ending.repeat(need - have);
+                            out.insert_str(at, &more);
+                            if verbatim_end > at {
+                                verbatim_end += more.len();
+                            }
+                            breaks += need - have;
+                        }
+                    }
                 }
             }
             Doc::Group(inner) | Doc::ReluctantGroup(inner) => {
@@ -856,6 +974,7 @@ fn line_start_after(doc: &Doc<'_>, line_indent: usize, indent_width: usize) -> O
     fn walk(doc: &Doc<'_>, line_indent: usize, indent_width: usize, column: &mut Option<usize>) {
         match doc {
             Doc::Nil | Doc::BreakParent | Doc::LineSuffix(_) | Doc::CountFrom => {}
+            Doc::BlankLines { .. } | Doc::BlankAnchor | Doc::BlankStart | Doc::BlankEnd { .. } => {}
             Doc::Text(text) => {
                 if let Some(c) = column {
                     *c += width(text);
@@ -910,6 +1029,7 @@ fn first_line_fits(doc: &Doc<'_>, room: isize) -> bool {
     fn walk(doc: &Doc<'_>, room: &mut isize) -> Option<bool> {
         let done = match doc {
             Doc::Nil | Doc::LineSuffix(_) | Doc::BreakParent | Doc::CountFrom => None,
+            Doc::BlankLines { .. } | Doc::BlankAnchor | Doc::BlankStart | Doc::BlankEnd { .. } => None,
             Doc::Text(text) => {
                 *room -= width(text) as isize;
                 None
@@ -976,6 +1096,7 @@ fn fits(next: Command<'_, '_>, rest: &[Command<'_, '_>], mut room: isize) -> boo
         };
         match doc {
             Doc::Nil | Doc::LineSuffix(_) | Doc::CountFrom => {}
+            Doc::BlankLines { .. } | Doc::BlankAnchor | Doc::BlankStart | Doc::BlankEnd { .. } => {}
             Doc::Text(text) => room -= width(text) as isize,
             Doc::Verbatim(text) | Doc::Relative { text, .. } => match text.find(['\n', '\r']) {
                 Some(_) if mode == Mode::Flat => return false,

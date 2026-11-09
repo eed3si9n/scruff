@@ -172,6 +172,7 @@ val ok = alpha
   && beta
   && gamma
   && delta1
+
 def f = alpha && beta
 
 <<< parentheses needed for grouping stay
@@ -183,6 +184,7 @@ val m = (alpha && beta) || (gamma &&
   delta)
 >>>
 val n = count + (alpha && beta)
+
 val m = ((alpha && beta)
   || (gamma && delta))
 
@@ -219,6 +221,7 @@ val long = alpha &&
 >>>
 val ok = alpha && beta && gamma
 val no = alpha && beta && gamma
+
 val long = alpha
   && beta
   && gamma

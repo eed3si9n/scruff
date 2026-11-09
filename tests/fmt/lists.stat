@@ -26,6 +26,7 @@ def eval(expression: String): Result =
 >>>
 val x =
   compute(alpha, beta, gamma, delta)
+
 def eval(expression: String): Result =
   eval(expression, noImports, srcName)
 
@@ -68,6 +69,7 @@ val x = outer(
   gamma1,
   delta1,
 )
+
 val y = outer(
   inner(
     alpha,
@@ -334,6 +336,7 @@ val zs = xs.map { x => f(x) }
 val ys = xs.map { x =>
   f(x, alpha, beta, gamma, delta)
 }
+
 val zs = xs.map { x => f(x) }
 
 <<< case clauses are left alone; a block holding one expression breaks the same way
@@ -344,6 +347,7 @@ val y = g { compute(alpha, beta, gamma, delta1) }
 >>>
 val ys =
   xs.map { case (k, v) => k + v + other }
+
 val y = g {
   compute(alpha, beta, gamma, delta1)
 }
@@ -355,6 +359,7 @@ val a = reify { reify { x } }
 val ys = xs.flatMap { x => ys.map { y => combine(x, y) } }
 >>>
 val a = reify { reify { x } }
+
 val ys = xs.flatMap { x =>
   ys.map { y => combine(x, y) }
 }
@@ -377,9 +382,11 @@ val vs = xs.flatMap { x =>
 >>>
 val y = g { f(x) }
 val zs = xs.map { x => f(x) }
+
 val ws = xs.map { x =>
   compute(alpha, beta)
 }
+
 val vs = xs.flatMap { x =>
   ys.map { y => combine(x, y) }
 }
@@ -409,18 +416,22 @@ val ws = xs.map { x =>
 def f = {
   g(1)
 }
+
 val a = if (c) {
   b
 } else {
   d
 }
+
 val ys = xs.map {
   x => f(x)
 }
+
 val zs = xs.map { x =>
   val y = f(x)
   y
 }
+
 val ws = xs.map { x =>
   import y._
 }

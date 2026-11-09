@@ -65,6 +65,8 @@ class A @Inject()(b: C)
 class B @Inject (b: C)
 >>>
 class A @Inject() (b: C)
+
+
 class B @Inject (b: C)
 
 <<< a keyword used as a name applies without a space
@@ -610,7 +612,11 @@ class Server private[IPC](s: Int)
 class A private (s: Int)
 >>>
 private[sbt] val x = 1
+
+
 class Server private[IPC] (s: Int)
+
+
 class A private (s: Int)
 
 <<< a repeated parameter type hugs its star

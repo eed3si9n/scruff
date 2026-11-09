@@ -142,6 +142,49 @@ val skip = isCi && isPullRequest
   || dryRun && warningCount + errorCount == 0
 ```
 
+## Blank lines
+
+Scruff adds 2 blank lines above a top-level class, trait, object, or enum, except 1 blank line between a class and its companion object, and 1 line above a nested one.
+
+Scruff adds 1 blank line above and below a `val`, `var`, or `def` that takes more than one line
+
+```scala
+package app
+import scala.util.Try
+class Box(val value: Int):
+  val doubled = value * 2
+  def show = s"Box($value)"
+  def merge(other: Box) =
+    val sum = value + other.value
+    Box(sum)
+  val zero = 0
+object Box:
+  def empty = Box(0)
+```
+
+becomes
+
+```scala
+// scruffed
+package app
+
+import scala.util.Try
+
+
+class Box(val value: Int):
+  val doubled = value * 2
+  def show = s"Box($value)"
+
+  def merge(other: Box) =
+    val sum = value + other.value
+    Box(sum)
+
+  val zero = 0
+
+object Box:
+  def empty = Box(0)
+```
+
 ## Scala 3 dialect
 
 Scala 3 is the default dialect of Scruff formatter:

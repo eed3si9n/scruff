@@ -18,6 +18,7 @@ trait T {
 >>>
 trait T:
   self: A & B =>
+
   def f(x: Any) = x match
     case y: (A & B) => y
 
@@ -43,6 +44,7 @@ trait T extends A with B
 val a = new A with B
 >>>
 trait T extends A, B
+
 val a = new A with B
 
 <<< a refinement keeps `with`

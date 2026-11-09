@@ -5,6 +5,7 @@ package a.b
 
 import x.{ y, z }
 
+
 /** Docs.
  *  More.
  */
@@ -17,6 +18,7 @@ class A(x: Int) extends B {
 package a.b
 
 import x.{ y, z }
+
 
 /** Docs.
  *  More.
@@ -52,6 +54,7 @@ object A {
 enum Color:
   case Red, Green
 
+
 object Main:
   def show(c: Color): String = c match
     case Color.Red => "red"
@@ -60,6 +63,7 @@ object Main:
 >>>
 enum Color:
   case Red, Green
+
 
 object Main:
   def show(c: Color): String = c match

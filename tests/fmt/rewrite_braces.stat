@@ -50,6 +50,7 @@ def g =
 def f =
   if c then a
   else b
+
 def g =
   try a
   catch case e: Exception => b
@@ -145,6 +146,7 @@ val y = 2
 class A: // a note
   val x = 1
   // the end
+
 val y = 2
 
 <<< braces stay where Scala 3 needs them or the layout is in doubt
@@ -157,9 +159,11 @@ new A {
 }
 >>>
 def f = { a }
+
 val g = {
   a
 }.map(h)
+
 new A {
   val x = 1
 }
@@ -199,6 +203,7 @@ object A {
     val x = 1
     x // the result
   }
+
   def g =
     try {
       a
@@ -206,6 +211,7 @@ object A {
     } catch {
       case e: Exception => c
     } finally d
+
   def h(x: Int) = x match {
     case 1 => "one"
     case _ => "many"

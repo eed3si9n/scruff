@@ -33,6 +33,7 @@ object A {
 >>>
 object A:
   import b.c.*
+
   def f = { import d.*; 1 }
 
 <<< comments stay where they are

@@ -21,10 +21,12 @@ object A:
   def short = x match
     case 1 => a
     case _ => b
+
   def longWithALongerHeader(x: Any): Int =
     x match
       case 1 => a
       case _ => b
+
   def next = x match
     case 1 => a
     case _ => b
@@ -59,6 +61,7 @@ object A:
     else
       d()
       e()
+
   def longWithALongerHeader(x: Any): Int =
     if c then
       a()
@@ -66,6 +69,7 @@ object A:
     else
       d()
       e()
+
   def next =
     if c then
       a()
@@ -109,6 +113,7 @@ object A:
       case e: IOException => c
       case e: Exception   => d
     finally e()
+
   def longWithALongerHeader(x: Any): Int =
     try
       a()
@@ -117,6 +122,7 @@ object A:
       case e: IOException => c
       case e: Exception   => d
     finally e()
+
   def next =
     try
       a()
@@ -145,10 +151,12 @@ object A:
     while c do
       a()
       b()
+
   def longWithALongerHeader(x: Any): Int =
     while c do
       a()
       b()
+
   def next =
     while c do
       a()
@@ -172,10 +180,12 @@ object A:
     for x <- xs yield
       val y = x
       y
+
   def longWithALongerHeader(x: Any): Int =
     for x <- xs yield
       val y = x
       y
+
   def next =
     for x <- xs yield
       val y = x
@@ -199,10 +209,12 @@ object A:
     for x <- xs do
       f(x)
       g(x)
+
   def longWithALongerHeader(x: Any): Int =
     for x <- xs do
       f(x)
       g(x)
+
   def next =
     for x <- xs do
       f(x)
@@ -230,11 +242,13 @@ object A:
       x <- xs
       y <- ys
     yield x + y
+
   def longWithALongerHeader(x: Any): Int =
     for
       x <- xs
       y <- ys
     yield x + y
+
   def next =
     for
       x <- xs
@@ -265,11 +279,13 @@ object A {
     case 1 => a
     case _ => b
   }
+
   def longWithALongerHeader(x: Any): Int =
     x match {
       case 1 => a
       case _ => b
     }
+
   def next = x match {
     case 1 => a
     case _ => b
@@ -313,6 +329,7 @@ object A {
       d()
       e()
     }
+
   def longWithALongerHeader(x: Any): Int =
     if (c) {
       a()
@@ -321,6 +338,7 @@ object A {
       d()
       e()
     }
+
   def next =
     if (c) {
       a()
@@ -368,6 +386,7 @@ object A {
       case e: IOException => c
       case e: Exception   => d
     } finally e()
+
   def longWithALongerHeader(x: Any): Int =
     try {
       a()
@@ -376,6 +395,7 @@ object A {
       case e: IOException => c
       case e: Exception   => d
     } finally e()
+
   def next =
     try {
       a()
@@ -411,11 +431,13 @@ object A {
       a()
       b()
     }
+
   def longWithALongerHeader(x: Any): Int =
     while (c) {
       a()
       b()
     }
+
   def next =
     while (c) {
       a()
@@ -448,11 +470,13 @@ object A {
       a()
       b()
     } while (c)
+
   def longWithALongerHeader(x: Any): Int =
     do {
       a()
       b()
     } while (c)
+
   def next =
     do {
       a()
@@ -485,11 +509,13 @@ object A {
       val y = x
       y
     }
+
   def longWithALongerHeader(x: Any): Int =
     for (x <- xs) yield {
       val y = x
       y
     }
+
   def next =
     for (x <- xs) yield {
       val y = x
@@ -522,11 +548,13 @@ object A {
       f(x)
       g(x)
     }
+
   def longWithALongerHeader(x: Any): Int =
     for (x <- xs) {
       f(x)
       g(x)
     }
+
   def next =
     for (x <- xs) {
       f(x)
@@ -559,11 +587,13 @@ object A {
       x <- xs
       y <- ys
     } yield x + y
+
   def longWithALongerHeader(x: Any): Int =
     for {
       x <- xs
       y <- ys
     } yield x + y
+
   def next =
     for {
       x <- xs
@@ -591,20 +621,24 @@ object A:
   def discoverMainClasses(analysis: CompileAnalysis): Seq[String] =
     analysis match
       case a: Analysis => a.mainClasses
+
   private def definesMacro(analysis: CompileAnalysis): Boolean =
     if analysis.ok then
       a()
       b()
     else c
+
   def withCleanup(resource: Resource): Unit =
     try
       a()
       b()
     finally c()
+
   def collectEverything(xs: List[Int]): List[Int] =
     for x <- xs yield
       val y = x + 1
       y
+end A
 
 <<< a match starting within 30 columns joins the `=`'s line, however it's written
 object A:
@@ -625,8 +659,10 @@ object A:
   def f(x: Any): Int = x match
     case 1 => 2
     case _ => 3
+
   val cross = id.crossVersionedValue match
     case CrossValue.Full => full
+
   def g(x: Int): Int = x match
     case 1 => 2
 
@@ -647,11 +683,13 @@ object A:
     for x <- xs yield
       val y = x + 1
       y
+
   def g =
     for
       x <- xs
       y <- ys
     yield x + y
+
   def h = for x <- xs yield x
 
 <<< a match with cases at its own width stays on the next line
@@ -710,20 +748,26 @@ object A:
 >>>
 object A:
   def f(x: Any) = x match { case 1 => 2 }
+
   val t = Def.task:
     val y = 1
     y
+
   val ys = xs.map: x =>
     val y = x + 1
     y
+
   val h = (x: Int) => {
     a(x)
     b(x)
   }
+
   def g = if c then a else b
+
   def k = // the reason
     x match
       case _ => 1
+end A
 
 <<< Scala 2: a match in braces moves with its cases
 dialect = scala213
@@ -743,6 +787,7 @@ object A {
     analysis match {
       case 1 => 2
     }
+
   def f(x: Any) = x match {
     case 1 => 2
   }

@@ -1,0 +1,401 @@
+# Blank lines: kept as written, as scalafmt does with sbt's settings, but
+# after Black, at most 2 in a row between definitions in a template (a class,
+# object, trait or enum body, a package, or the file) and 1 in a block or a
+# method body; none at the start or end of the file. Blank lines are added
+# after the imports and above a top-level class, trait, object or enum.
+
+<<< up to two blank lines in a row stay
+val a = 1
+
+val b = 2
+
+
+val c = 3
+>>>
+val a = 1
+
+val b = 2
+
+
+val c = 3
+
+<<< longer runs become two
+val a = 1
+
+
+
+
+val b = 2
+>>>
+val a = 1
+
+
+val b = 2
+
+<<< definitions in a template may have two
+dialect = scala213
+===
+object A {
+  val a = 1
+
+
+  def b = 2
+}
+>>>
+object A {
+  val a = 1
+
+
+  def b = 2
+}
+
+<<< in a method body, at most one in a row
+dialect = scala213
+===
+object A {
+  def f = {
+    val a = 1
+
+
+    val b = 2
+    // note
+
+
+    a + b
+  }
+}
+>>>
+object A {
+  def f = {
+    val a = 1
+
+    val b = 2
+    // note
+
+    a + b
+  }
+}
+
+<<< a nested object is a template too
+dialect = scala213
+===
+object A {
+  object B {
+    val c = 1
+
+
+    val d = 2
+  }
+}
+>>>
+object A {
+  object B {
+    val c = 1
+
+
+    val d = 2
+  }
+}
+
+<<< a nested function is inside too
+object A:
+  def f =
+    def g = 1
+
+
+    def h = 2
+    g + h
+>>>
+object A:
+  def f =
+    def g = 1
+
+    def h = 2
+    g + h
+
+<<< before a top-level comment, two stay
+val a = 1
+
+
+// next
+val b = 2
+>>>
+val a = 1
+
+
+// next
+val b = 2
+
+<<< blank lines inside braces stay
+dialect = scala213
+===
+object A {
+
+  val a = 1
+
+}
+>>>
+object A {
+
+  val a = 1
+
+}
+
+<<< blank lines at the start of the file go
+
+
+val a = 1
+>>>
+val a = 1
+
+<<< blank lines in strings and format-off blocks stay
+val s = """a
+
+
+
+b"""
+// format: off
+val t = 1
+
+
+
+// format: on
+val u = 2
+>>>
+val s = """a
+
+
+
+b"""
+
+// format: off
+val t = 1
+
+
+
+// format: on
+val u = 2
+
+<<< with none written, the imports and top-level templates get them
+dialect = scala213
+===
+package a
+import b.c
+import d.e
+val v = 1
+class A { def f = 1 }
+object A
+trait B
+// about C
+object C { val x = 1 }
+>>>
+package a
+
+import b.c
+import d.e
+
+val v = 1
+
+
+class A { def f = 1 }
+
+object A
+
+
+trait B
+
+
+// about C
+object C { val x = 1 }
+
+<<< a class right after the imports gets two
+import b.c
+class A
+>>>
+import b.c
+
+
+class A
+
+<<< a template in a body gets one blank line, unless it comes first
+dialect = scala213
+===
+package a
+class A {
+  class B
+  val x = 1
+  // about C
+  class C
+  def f = {
+    class D
+    class E
+  }
+}
+>>>
+package a
+
+class A {
+  class B
+
+  val x = 1
+
+  // about C
+  class C
+
+  def f = {
+    class D
+    class E
+  }
+}
+
+<<< a val or def on one line may follow another with any number, after anything else one
+dialect = scala213
+===
+object A {
+  import b.c
+  val a = 1
+  val b = 2
+
+
+  def c = 3
+  def d: Int
+  class K
+  def e = 4
+  println(1)
+  val f = 5
+  def g =
+    6
+  val h = 7
+}
+>>>
+object A {
+  import b.c
+
+  val a = 1
+  val b = 2
+
+
+  def c = 3
+  def d: Int
+
+  class K
+
+  def e = 4
+  println(1)
+
+  val f = 5
+
+  def g =
+    6
+
+  val h = 7
+}
+
+<<< Scala 3 with none written
+package app
+import scala.util.Try
+import app.model.*
+val limit = 10
+def helper = 1
+var counter = 0
+enum Color:
+  case Red, Green
+  def name = toString
+class Box(val value: Int):
+  val doubled = value * 2
+  var seen = 0
+  def show = s"Box($value)"
+  class Inner
+  object Inner
+  def merge(other: Box) =
+    Box(value + other.value)
+  def mergeAll(first: Box, second: Box, third: Box) = Box(first.value + second.value + third.value + value + 1000000)
+object Box:
+  def empty = Box(0)
+  val zero = 0
+trait Shape:
+  def area: Double
+  val name: String
+  trait Visitor
+// about Main
+object Main:
+  def main(args: Array[String]): Unit =
+    println("hi")
+  end main
+  val x = 1
+>>>
+package app
+
+import scala.util.Try
+import app.model.*
+
+val limit = 10
+def helper = 1
+var counter = 0
+
+
+enum Color:
+  case Red, Green
+
+  def name = toString
+
+
+class Box(val value: Int):
+  val doubled = value * 2
+  var seen = 0
+  def show = s"Box($value)"
+
+  class Inner
+
+  object Inner
+
+  def merge(other: Box) = Box(value + other.value)
+
+  def mergeAll(first: Box, second: Box, third: Box) =
+    Box(first.value + second.value + third.value + value + 1000000)
+
+object Box:
+  def empty = Box(0)
+  val zero = 0
+
+
+trait Shape:
+  def area: Double
+  val name: String
+
+  trait Visitor
+
+
+// about Main
+object Main:
+  def main(args: Array[String]): Unit = println("hi")
+  end main
+
+  val x = 1
+
+<<< a val, var or def over several lines has one blank line above and below it
+object A:
+  val a = 1
+  def f(x: Int) =
+    val y = x + 1
+    y * 2
+  var b = 0
+  val c = x match
+    case 1 => a
+    case _ => b
+  def g = 3
+>>>
+object A:
+  val a = 1
+
+  def f(x: Int) =
+    val y = x + 1
+    y * 2
+
+  var b = 0
+
+  val c = x match
+    case 1 => a
+    case _ => b
+
+  def g = 3

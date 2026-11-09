@@ -81,6 +81,7 @@ val zs = xs.map(x => transform(x, alpha, beta, gamma1)).filter(ok)
 val ys = xs
   .map(x => transform(x, alpha, beta))
   .filter(ok)
+
 val zs = xs
   .map(x =>
     transform(x, alpha, beta, gamma1)
@@ -111,10 +112,12 @@ val ys = xs
   .map(transform)
   .filter(good)
   .take(n1)
+
 val ys = xs
   .map(transform)
   .filter(good)
   .take(n1)
+
 val ys = xs
   .map(transform)
   .filter(good)
@@ -173,9 +176,11 @@ val b = xs.collect:
 Test / resourceGenerators += Def.task:
     Seq(resource)
   .taskValue
+
 val a = Def.task:
     Seq(resource)
   .taskValue
+
 val b = xs.collect:
     case Some(x) => x
   .toList
@@ -194,6 +199,7 @@ val b = xs
 val a = xs.foreach: x =>
     println(x)
   .size
+
 val b = xs.foreach: (x, y) =>
     val z = x
     z

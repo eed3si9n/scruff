@@ -263,7 +263,10 @@ val y = f(/* a */x/* b */)
 >>>
 @inline /* hot */ def f = 1
 def g /* a */ = 1
+
+
 class A extends B, /* b */ C
+
 val m: Map[String, /* v */ Int] = Map()
 val x = if a then b else /* no */ c
 val y = f( /* a */ x /* b */ )
@@ -276,8 +279,11 @@ trait T /* t */ :
   val x = 1
 >>>
 class A extends B /* b */, C, D
+
 val y = f(a /* a */, b)
 val z = 1 /* z */; val w = 2
+
+
 trait T /* t */:
   val x = 1
 
@@ -303,6 +309,8 @@ object A {
   /* a */ val x = 1
   val y = 2
 }
+
+
 object B {
   /* b */ /* c */ val y = 2
 }

@@ -117,6 +117,9 @@ struct Style {
     /// Any other control structure always does. See
     /// [`Formatter::definition_body`].
     max_body_start: usize,
+    /// Line breaks, at least, in a statement the printer counts as long:
+    /// a val, var or def over several lines gets a blank line above it.
+    long_statement_min_breaks: usize,
 }
 
 /// After Black, the Python formatter, which allows 2 blank lines between
@@ -133,6 +136,7 @@ const STYLE: Style = Style {
     max_blank_lines_in_blocks: 1,
     end_marker_min_breaks: 20,
     max_body_start: 30,
+    long_statement_min_breaks: 1,
 };
 
 fn format_with(
@@ -372,6 +376,12 @@ struct Formatter<'t> {
     /// Where the token starts whose leading trivia a rule already printed,
     /// ahead of a group that must not contain its line break.
     leading_done: Option<TextSize>,
+    /// Statements whose leading trivia opened a frame for blank lines, which
+    /// the printer closes after the statement, innermost last.
+    blank_open: Vec<(SyntaxNode<'t>, u32)>,
+    /// Whether the leading trivia being built is a statement's, which the
+    /// printer may add blank lines above.
+    blank_anchor_wanted: bool,
     /// Where the token starts whose leading line break may be a space: a
     /// body joining its keyword's line.
     joining: Option<TextSize>,
@@ -460,6 +470,8 @@ impl<'t> Formatter<'t> {
             next_verbatim: 0,
             copied_until: TextSize::from(0),
             leading_done: None,
+            blank_open: Vec::new(),
+            blank_anchor_wanted: false,
             joining: None,
             unframed: None,
             trailing_skipped: Vec::new(),
@@ -496,6 +508,21 @@ impl<'t> Formatter<'t> {
     }
 
     fn node(&mut self, node: SyntaxNode<'t>) -> Doc<'t> {
+        let doc = self.node_with_markers(node);
+        // The frame for blank lines above the statement, if its leading
+        // trivia opened one, closes with it; frames inside that never did
+        // go with it.
+        match self.blank_open.iter().rposition(|(n, _)| *n == node) {
+            Some(i) => {
+                let id = self.blank_open[i].1;
+                self.blank_open.truncate(i);
+                doc + Doc::BlankEnd { id }
+            }
+            None => doc,
+        }
+    }
+
+    fn node_with_markers(&mut self, node: SyntaxNode<'t>) -> Doc<'t> {
         // A definition's body that starts the line after its `=`.
         // If it breaks, the lines inside it were placed from the line the
         // body was on, so they move as far as its first line does.
@@ -2053,13 +2080,33 @@ impl<'t> Formatter<'t> {
     fn leading(&mut self, token: SyntaxToken<'t>) -> Doc<'t> {
         let mut docs = Vec::new();
         let leading: Vec<_> = token.leading_trivia().collect();
+        // A statement that needs blank lines above it opens a frame, which
+        // closes after the statement: see [`Formatter::node`].
+        let frame = blank_rules_above(&token).map(|(statement, rules)| {
+            let id = u32::from(statement.text_range().start());
+            self.blank_open.push((statement, id));
+            self.blank_anchor_wanted = true;
+            Doc::BlankLines {
+                id,
+                // Never more than the style allows in a row.
+                always: rules.always.min(self.style.max_blank_lines_in_templates),
+                when_long: rules.when_long.min(self.style.max_blank_lines_in_templates),
+                after_long: rules.after_long.min(self.style.max_blank_lines_in_templates),
+                binding: rules.binding,
+                min_breaks: self.style.long_statement_min_breaks,
+            }
+        });
         self.trivia_within_lines(&mut docs, &leading, Gap::LineStart, Some(&token));
-        let doc = Doc::concat(docs);
+        self.blank_anchor_wanted = false;
+        let mut doc = Doc::concat(docs);
         if self.joining == Some(token.text_range().start()) {
             self.joining = None;
-            return Doc::if_break(doc, Doc::text(" "));
+            doc = Doc::if_break(doc, Doc::text(" "));
         }
-        doc
+        match frame {
+            Some(frame) => frame + doc + Doc::BlankStart,
+            None => doc,
+        }
     }
 
     /// Drops the leading trivia of the element's first token: the line
@@ -2158,12 +2205,37 @@ impl<'t> Formatter<'t> {
     ) {
         // Whether a line break before this point placed the line.
         let mut placed = false;
+        // Whether the printer may add blank lines at the first line break.
+        let mut anchor_wanted = std::mem::take(&mut self.blank_anchor_wanted);
+        let mut anchor_here = false;
         for (i, &t) in trivia.iter().enumerate() {
             let start = t.text_range().start();
             match t.kind() {
                 TriviaKind::Newline => {
                     if self.is_free(start) {
                         self.line_breaks += 1;
+                        // A statement that needs blank lines above it gets
+                        // them at the first line break, before any comment,
+                        // where the printer adds them. A comment indented deeper than the statement ends
+                        // the body above it, and the blank line is not for it.
+                        let belongs_above = next.is_some_and(|n| {
+                            trivia[i..]
+                                .iter()
+                                .find(|t| {
+                                    matches!(
+                                        t.kind(),
+                                        TriviaKind::LineComment | TriviaKind::BlockComment
+                                    )
+                                })
+                                .is_some_and(|c| {
+                                    column_of(self.text, c.text_range().start())
+                                        > column_of(self.text, n.text_range().start())
+                                })
+                        });
+                        if anchor_wanted && self.line_breaks == 1 && !belongs_above {
+                            anchor_wanted = false;
+                            anchor_here = true;
+                        }
                         // The code after the line breaks decides how many blank
                         // lines it may have before it. A comment between them
                         // belongs to that code. Asked only when it matters:
@@ -2205,6 +2277,9 @@ impl<'t> Formatter<'t> {
                         }
                     }
                     before = Gap::LineStart;
+                    if std::mem::take(&mut anchor_here) {
+                        docs.push(Doc::BlankAnchor);
+                    }
                 }
                 // A blank line's whitespace, which the printer would trim
                 // anyway. Keeping it would make it the next line's
@@ -2649,6 +2724,158 @@ fn starts_line(token: &SyntaxToken<'_>) -> bool {
         .any(|t| t.kind() == TriviaKind::Newline)
 }
 
+/// The blank lines a top-level or member statement needs above it.
+struct BlankRules {
+    /// At least this many, always.
+    always: usize,
+    /// At least this many if the statement prints over several lines: the
+    /// printer finds out.
+    when_long: usize,
+    /// At least this many if the statement before it is a val, var or def
+    /// that prints over several lines.
+    after_long: usize,
+    /// Whether the statement is a val, var or def.
+    binding: bool,
+}
+
+/// The statement `next` starts, if it needs blank lines above it, and how
+/// many: 2 above a top-level class, trait, object or enum, 1 between
+/// companions, 1 between the imports and any other statement, and 1 after
+/// the package clauses. A class, trait, object or enum in a body needs 1,
+/// unless it comes first. A val, var or def needs 1 after anything else, and
+/// when it's long, after anything; and anything needs 1 after a long one.
+/// Every statement is returned, as the printer measures each one. Nothing is
+/// asked at the start of the file.
+fn blank_rules_above<'t>(next: &SyntaxToken<'t>) -> Option<(SyntaxNode<'t>, BlankRules)> {
+    if next.is_trivia() || next.is_missing() {
+        return None;
+    }
+    // The statement `next` starts: the outermost node it's the first token
+    // of, if the file or a body is its parent.
+    let mut statement = None;
+    for node in next.parent_ancestors() {
+        let first = std::iter::successors(node.first_token(), SyntaxToken::next_token)
+            .find(|t| !t.is_trivia());
+        if first.is_none_or(|first| first != *next) {
+            break;
+        }
+        if node.parent().is_some_and(|p| {
+            matches!(
+                p.kind(),
+                SyntaxKind::CompilationUnit | SyntaxKind::TemplateBody | SyntaxKind::EnumBody
+            )
+        }) {
+            statement = Some(node);
+            break;
+        }
+    }
+    let statement = statement?;
+    let mut previous = statement.prev_sibling_or_token();
+    let previous = loop {
+        match previous {
+            Some(NodeOrToken::Node(n)) if !n.is_extra() => break n,
+            Some(NodeOrToken::Node(n)) => previous = n.prev_sibling_or_token(),
+            Some(NodeOrToken::Token(t)) => previous = t.prev_sibling_or_token(),
+            None => {
+                // The first statement needs nothing above it, but a
+                // later one may need to know if it was long.
+                let binding = matches!(
+                    statement.kind(),
+                    SyntaxKind::ValDefinition
+                        | SyntaxKind::ValDeclaration
+                        | SyntaxKind::VarDefinition
+                        | SyntaxKind::VarDeclaration
+                        | SyntaxKind::FunctionDefinition
+                        | SyntaxKind::FunctionDeclaration
+                );
+                return Some((
+                    statement,
+                    BlankRules {
+                        always: 0,
+                        when_long: 0,
+                        after_long: 0,
+                        binding,
+                    },
+                ));
+            }
+        }
+    };
+    let is_template = |n: &SyntaxNode<'t>| {
+        matches!(
+            n.kind(),
+            SyntaxKind::ClassDefinition
+                | SyntaxKind::TraitDefinition
+                | SyntaxKind::ObjectDefinition
+                | SyntaxKind::EnumDefinition
+        )
+    };
+    let name = |n: &SyntaxNode<'t>| {
+        n.child_by_field_name("name").map(|e| match e {
+            NodeOrToken::Node(n) => n.text(),
+            NodeOrToken::Token(t) => t.text(),
+        })
+    };
+    let is_binding = |n: &SyntaxNode<'t>| {
+        matches!(
+            n.kind(),
+            SyntaxKind::ValDefinition
+                | SyntaxKind::ValDeclaration
+                | SyntaxKind::VarDefinition
+                | SyntaxKind::VarDeclaration
+                | SyntaxKind::FunctionDefinition
+                | SyntaxKind::FunctionDeclaration
+        )
+    };
+    let rules = |always, when_long| BlankRules {
+        always,
+        when_long,
+        after_long: 1,
+        binding: is_binding(&statement),
+    };
+    // A val, var or def may follow another with any number of blank lines,
+    // unless it's long.
+    let binding = || rules(usize::from(!is_binding(&previous)), 1);
+    let found = if statement.parent().is_some_and(|p| p.kind() != SyntaxKind::CompilationUnit) {
+        // In a body.
+        match () {
+            _ if is_template(&statement) => rules(1, 0),
+            _ if is_binding(&statement) => binding(),
+            _ => rules(0, 0),
+        }
+    } else {
+        match (previous.kind(), is_template(&statement)) {
+            // A package clause without a body, except one more of them.
+            (SyntaxKind::PackageClause, _) if previous.child_by_field_name("body").is_none() => {
+                rules(usize::from(statement.kind() != SyntaxKind::PackageClause), 0)
+            }
+            (SyntaxKind::ImportDeclaration, _)
+                if statement.kind() == SyntaxKind::ImportDeclaration =>
+            {
+                rules(0, 0)
+            }
+            (SyntaxKind::ImportDeclaration, true) => rules(2, 0),
+            (SyntaxKind::ImportDeclaration, false) => rules(1, 0),
+            (_, false) if is_binding(&statement) => binding(),
+            (_, false) => rules(0, 0),
+            (_, true) => {
+                let companions = is_template(&previous)
+                    && (previous.kind() == SyntaxKind::ObjectDefinition)
+                        != (statement.kind() == SyntaxKind::ObjectDefinition)
+                    && name(&previous).is_some()
+                    && name(&previous) == name(&statement);
+                rules(if companions { 1 } else { 2 }, 0)
+            }
+        }
+    };
+    Some((statement, found))
+}
+
+/// The column of the offset in its line, in characters.
+fn column_of(text: &str, offset: TextSize) -> usize {
+    let before = &text[..usize::from(offset)];
+    before[before.rfind('\n').map_or(0, |i| i + 1)..].chars().count()
+}
+
 /// Whether `token` is in a statement of a template: the body of a class,
 /// object, trait or enum, an extension's methods, a package, or the file.
 /// Otherwise it's in a block, a method body or `case` clauses.
@@ -2804,7 +3031,7 @@ mod tests {
         let source = "val a = 1   \nval s = \"\"\"line   \n  more\"\"\"  \n";
         assert_eq!(
             fmt(source),
-            "val a = 1\nval s = \"\"\"line   \n  more\"\"\"\n"
+            "val a = 1\n\nval s = \"\"\"line   \n  more\"\"\"\n"
         );
     }
 
@@ -2865,6 +3092,76 @@ mod tests {
                 "  def f = {\n    val x = 1\n    x\n  }\n}\n",
             )
         );
+    }
+
+    #[test]
+    fn a_blank_line_follows_top_level_imports() {
+        assert_eq!(
+            fmt("import a.b\nimport c.d\nval x = 1\n"),
+            "import a.b\nimport c.d\n\nval x = 1\n"
+        );
+        assert_eq!(
+            fmt("import a.b // c\n// doc\nval x = 1\n"),
+            "import a.b // c\n\n// doc\nval x = 1\n"
+        );
+        assert_eq!(
+            fmt("import a.b\n\n\nval x = 1\n"),
+            "import a.b\n\n\nval x = 1\n",
+            "more blank lines stay"
+        );
+        assert_eq!(fmt("import a.b\nimport c.d\n"), "import a.b\nimport c.d\n");
+        let nested = "object A:\n  import a.b\n\n  val x = 1\n";
+        assert_eq!(fmt(nested), nested, "in a body too, by the rule for a val");
+    }
+
+    #[test]
+    fn two_blank_lines_go_above_top_level_templates() {
+        assert_eq!(
+            fmt("val v = 1\nclass A\ntrait B\nobject C\n"),
+            "val v = 1\n\n\nclass A\n\n\ntrait B\n\n\nobject C\n"
+        );
+        assert_eq!(
+            fmt("import a.b\nclass A\n"),
+            "import a.b\n\n\nclass A\n",
+            "after imports"
+        );
+        assert_eq!(
+            fmt("class A\n// doc\nclass B\n"),
+            "class A\n\n\n// doc\nclass B\n",
+            "above the comment"
+        );
+        assert_eq!(
+            fmt("class A\n\n\n\nclass B\n"),
+            "class A\n\n\nclass B\n",
+            "capped as before"
+        );
+        assert_eq!(
+            fmt("class A\nobject A\nobject B\ntrait B\n"),
+            "class A\n\nobject A\n\n\nobject B\n\ntrait B\n",
+            "one between companions, either order"
+        );
+        assert_eq!(
+            fmt("class A\nobject B\n"),
+            "class A\n\n\nobject B\n",
+            "different names"
+        );
+        assert_eq!(
+            fmt("package p\nclass A\n"),
+            "package p\n\nclass A\n",
+            "one after a package clause"
+        );
+        assert_eq!(
+            fmt("package p\npackage q\nimport a.b\n"),
+            "package p\npackage q\n\nimport a.b\n",
+            "none between package clauses"
+        );
+        assert_eq!(
+            fmt("object A:\n  class B\n  class C\n"),
+            "object A:\n  class B\n\n  class C\n",
+            "one in a body, none for the first"
+        );
+        let block = "def f =\n  class B\n  class C\n";
+        assert_eq!(fmt(block), block, "none in a block");
     }
 
     #[test]

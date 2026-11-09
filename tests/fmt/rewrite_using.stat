@@ -10,6 +10,8 @@ class C(x: Int)(implicit ec: ExecutionContext) {
 >>>
 def f(x: Int)(using ec: ExecutionContext): Future[Int] = Future(x)
 def g(using ord: Ordering[A], num: Numeric[A]): A
+
+
 class C(x: Int)(using ec: ExecutionContext):
   def this()(using ec: ExecutionContext) = this(1)
 
@@ -23,6 +25,8 @@ class C(implicit val ec: ExecutionContext)
 class D(implicit private val ec: ExecutionContext)
 >>>
 class C(implicit val ec: ExecutionContext)
+
+
 class D(implicit private val ec: ExecutionContext)
 
 <<< broken over lines
