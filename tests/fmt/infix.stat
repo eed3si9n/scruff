@@ -295,3 +295,14 @@ val ok = alpha && // why
 >>>
 val ok = alpha && // why
     beta && gamma
+
+<<< Scala 2: type arguments in an operand stay with it
+dialect = scala213
+===
+val isNull =
+  alpha.isInstanceOf[String] &&
+    b.asInstanceOf[String].size == 0
+>>>
+val isNull =
+  (alpha.isInstanceOf[String]
+    && b.asInstanceOf[String].size == 0)
