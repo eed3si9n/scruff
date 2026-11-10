@@ -391,6 +391,35 @@ val vs = xs.flatMap { x =>
   ys.map { y => combine(x, y) }
 }
 
+<<< a block argument followed by more of the call keeps the brace after it in place
+dialect = scala213
+===
+def f = {
+  g {
+    foo
+      .bar()
+      .baz()
+  }.map {
+    case _ =>
+  }
+  h {
+    foo
+      .bar()
+      .baz()
+      }.map {
+    case _ =>
+  }
+}
+>>>
+def f = {
+  g { foo.bar().baz() }.map {
+    case _ =>
+  }
+  h { foo.bar().baz() }.map {
+    case _ =>
+  }
+}
+
 <<< other blocks over several lines keep their breaks
 dialect = scala213
 ===

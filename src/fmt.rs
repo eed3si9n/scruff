@@ -253,9 +253,10 @@ pub fn to_doc<'t>(tree: &'t Tree) -> Doc<'t> {
 }
 
 /// What the formatter lays out itself, for [`indent::Layout`]: the lists
-/// the list rule lays out, as `(` and `)` offsets, and the lines boolean
-/// chains join or break, with their parentheses' where those are the
-/// chain's own.
+/// the list rule lays out, as `(` and `)` offsets, and block arguments, as
+/// `{` and `}`; the lines boolean chains join or break, with their
+/// parentheses' where those are the chain's own; the lines select chains
+/// break; and the `{` of a match after such a chain.
 fn relaid(tree: &Tree, rules: Rules, style: Style, broken_chains: bool) -> indent::Relaid {
     let mut relaid = indent::Relaid::default();
     if rules != Rules::Structural {
@@ -284,6 +285,32 @@ fn relaid(tree: &Tree, rules: Rules, style: Style, broken_chains: bool) -> inden
                     .extend(first_code_token(operand).and_then(line_first));
             }
         }
+        if let Some(parts) = formatter.chain_parts(node) {
+            relaid.continued.extend(
+                parts
+                    .segments
+                    .iter()
+                    .filter_map(|segment| first_code_token(&segment[0]))
+                    .filter_map(line_first),
+            );
+            // A match after the chain is indented from the line its `{`, or
+            // its `match` without braces, ends up on: the chain's last line
+            // when it breaks.
+            if node.field_name() == Some("value")
+                && let Some(parent) = node.parent()
+                && parent.kind() == SyntaxKind::MatchExpression
+                && let Some(body) = parent.child_by_field_name("body")
+                && let Some(open) = match body.kind() {
+                    SyntaxKind::IndentedCases => parent
+                        .children_with_tokens()
+                        .filter_map(|c| c.as_token().copied())
+                        .find(|t| t.kind() == T!["match"]),
+                    _ => first_code_token(&body).filter(|t| t.text() == "{"),
+                }
+            {
+                relaid.after_chains.push(open.text_range().start());
+            }
+        }
         if let Some((chain, close)) = formatter.chain_parens_parts(node) {
             relaid
                 .joined
@@ -298,11 +325,17 @@ fn relaid(tree: &Tree, rules: Rules, style: Style, broken_chains: bool) -> inden
             relaid
                 .joined
                 .extend(first_code_token(body).and_then(line_first));
-            relaid.joined.extend(line_first(parts.close));
+            relaid.lists.push((
+                parts.open.text_range().start(),
+                parts.close.text_range().start(),
+            ));
         }
     }
     relaid.joined.sort();
     relaid.joined.dedup();
+    relaid.continued.sort();
+    relaid.continued.dedup();
+    relaid.after_chains.sort();
     relaid
 }
 
