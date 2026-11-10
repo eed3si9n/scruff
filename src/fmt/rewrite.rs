@@ -1959,6 +1959,8 @@ mod tests {
             "if (c)\n  a\nelse\n  b\n",
             // Scala 2 has no end markers.
             "def f =\n  a\n  b\nend f\n",
+            // Braced typed lambda with tuple type is not a colon argument.
+            "val x = xs.flatMap { a: (String, Json) =>\n  a._2\n}\n",
         ] {
             assert_eq!(changed(same, OLD), None, "{same}");
         }
