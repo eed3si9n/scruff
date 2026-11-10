@@ -204,3 +204,91 @@ val b = xs.foreach: (x, y) =>
     val z = x
     z
   .size
+
+<<< a match after a broken chain indents its cases from the chain's last line
+dialect = scala213
+===
+def f = {
+  client.get(alpha, beta).map(f).toOption match {
+    case Some(n) => n
+  }
+  client
+    .get(alpha, beta, gamma)
+    .map(f)
+    .toOption match {
+      case Some(n) => n
+    }
+  client
+    .get(alpha, beta, gamma)
+    .map(f)
+    .toOption match {
+    case Some(n) => n
+  }
+}
+>>>
+def f = {
+  client
+    .get(alpha, beta)
+    .map(f)
+    .toOption match {
+      case Some(n) => n
+    }
+  client
+    .get(alpha, beta, gamma)
+    .map(f)
+    .toOption match {
+      case Some(n) => n
+    }
+  client
+    .get(alpha, beta, gamma)
+    .map(f)
+    .toOption match {
+      case Some(n) => n
+    }
+}
+
+<<< a match after a chain that fits indents its cases from the chain's line
+dialect = scala213
+===
+def f = {
+  client.get(1).map(f).toOption match {
+    case Some(n) => n
+  }
+  client
+    .get(1)
+    .map(f)
+    .toOption match {
+      case Some(n) => n
+    }
+}
+>>>
+def f = {
+  client.get(1).map(f).toOption match {
+    case Some(n) => n
+  }
+  client.get(1).map(f).toOption match {
+    case Some(n) => n
+  }
+}
+
+<<< without braces, a match after a broken chain indents its cases from the chain's last line
+def f =
+  client.get(alpha, beta).map(f).toOption match
+    case Some(n) => n
+  client
+    .get(alpha, beta, gamma)
+    .map(f)
+    .toOption match
+    case Some(n) => n
+>>>
+def f =
+  client
+    .get(alpha, beta)
+    .map(f)
+    .toOption match
+      case Some(n) => n
+  client
+    .get(alpha, beta, gamma)
+    .map(f)
+    .toOption match
+      case Some(n) => n

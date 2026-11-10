@@ -34,14 +34,23 @@ use crate::lossless_tree::{
 /// What the formatter lays out itself, so the layout follows it.
 #[derive(Default, Debug)]
 pub(super) struct Relaid {
-    /// The `(` and `)` of lists whose line breaks the formatter decides:
-    /// what follows the `)` ends up on a line indented as the `(`'s line,
-    /// whether the list is joined or broken.
+    /// The `(` and `)` of lists whose line breaks the formatter decides, or
+    /// the `{` and `}` of such a block argument: what follows the close ends
+    /// up on a line indented as the open's line, whether the list is joined
+    /// or broken.
     pub(super) lists: Vec<(TextSize, TextSize)>,
     /// Where lines start that the formatter joins to the line before or
     /// breaks itself, as a boolean chain's: they aren't laid out, and what
     /// they hold is on the line before.
     pub(super) joined: Vec<TextSize>,
+    /// Where lines start that the formatter breaks itself, as a select
+    /// chain's `.`: they're laid out, but count as on the line before for
+    /// where a block's frame starts.
+    pub(super) continued: Vec<TextSize>,
+    /// The `{` of each match after a select chain the formatter lays out,
+    /// or its `match` without braces: its cases are indented from the line
+    /// that ends up on, not from where the chain starts.
+    pub(super) after_chains: Vec<TextSize>,
     /// Whether a boolean chain the formatter lays out is written over
     /// several lines.
     pub(super) broken_chains: bool,
@@ -270,7 +279,7 @@ fn compute(tree: &Tree, relaid: &Relaid) -> Option<Layout> {
     }];
     let mut groups = 0;
     for node in tree.syntax().descendants() {
-        let Some(container) = container(node, &continued) else {
+        let Some(container) = container(node, &continued, &relaid.after_chains) else {
             continue;
         };
         match width_runs(&container) {
@@ -361,14 +370,19 @@ fn compute(tree: &Tree, relaid: &Relaid) -> Option<Layout> {
                     continue;
                 }
                 // Cases written at the width of their `match` stay there, as
-                // scalafmt leaves them.
-                let step = if container.cases && indent == lines[line].width {
+                // scalafmt leaves them, but not after a chain the formatter
+                // lays out, where they go a step deeper.
+                let after_chain = relaid
+                    .after_chains
+                    .binary_search(&opener.text_range().start())
+                    .is_ok();
+                let step = if container.cases && indent == lines[line].width && !after_chain {
                     0
                 } else {
                     STEP
                 };
                 if container.cases {
-                    floor = lines[line].width + step;
+                    floor = lines[line].width + if after_chain { 0 } else { step };
                 }
                 deeper[index] = step > 0;
                 width as usize + step
@@ -445,6 +459,7 @@ fn compute(tree: &Tree, relaid: &Relaid) -> Option<Layout> {
     }];
     let mut frames = HashMap::new();
     let mut nested = HashMap::new();
+    let mut closes = Vec::new();
     for (index, container) in containers.iter().enumerate().skip(1) {
         // A container that isn't placed moves with the one around it.
         let Some((indent, _)) = placed[index] else {
@@ -481,6 +496,24 @@ fn compute(tree: &Tree, relaid: &Relaid) -> Option<Layout> {
                 from: lines[opener_line(line)].width,
                 container: None,
             });
+            // A `}` after a frame that starts on an earlier line than its
+            // `{`, or a match's after a broken chain, goes at the frame's
+            // line: written, it may line up with either line.
+            if container.braced
+                && container.piece.is_none_or(|p| p.last)
+                && let Some(opener) = container.opener
+                && (line_of(opener.text_range().start()).map(opener_line)
+                    != Some(opener_line(line))
+                    || relaid
+                        .after_chains
+                        .binary_search(&opener.text_range().start())
+                        .is_ok())
+                && let Some(close) = container.node.last_code_token()
+                && close.text() == "}"
+                && close.is_first_on_line()
+            {
+                closes.push(close.text_range().start());
+            }
         }
         // Its statements, from their indentation. A split container's runs
         // are its statements together.
@@ -527,6 +560,7 @@ fn compute(tree: &Tree, relaid: &Relaid) -> Option<Layout> {
         let offset = match span.container {
             // The same comment rule as above.
             Some(c) if c == o && line.comment && line.width < span.from && shift[o] != 0 => 0,
+            None if closes.contains(&line.first) => 0,
             _ => line.width as isize - span.from as isize,
         };
         offsets.insert(line.first, offset);
@@ -540,7 +574,11 @@ fn compute(tree: &Tree, relaid: &Relaid) -> Option<Layout> {
 }
 
 /// The container a node makes, if any.
-fn container<'t>(node: SyntaxNode<'t>, continued: &[TextSize]) -> Option<Container<'t>> {
+fn container<'t>(
+    node: SyntaxNode<'t>,
+    continued: &[TextSize],
+    after_chains: &[TextSize],
+) -> Option<Container<'t>> {
     // A lambda body in braces is no region, since its indentation doesn't
     // matter, but its lines are indented from its arrow all the same.
     let lambda_body = node.kind() == SyntaxKind::IndentedBlock
@@ -567,13 +605,19 @@ fn container<'t>(node: SyntaxNode<'t>, continued: &[TextSize]) -> Option<Contain
         // From after the opener, which an `extension`'s range includes, to
         // its last token: the node can end at the next line's first token.
         let last = node.last_code_token()?;
-        let (frame, start) = match definition_start(node) {
+        let after_chain = after_chains
+            .binary_search(&opener.text_range().start())
+            .is_ok();
+        let (frame, start) = match definition_start(node).filter(|_| !after_chain) {
             Some(start) => ((node.parent()?, Frame::AfterLeading), start),
             // An extension's range takes in its opener.
             None if node.text_range().start() <= opener.text_range().start() => {
                 ((node, Frame::AfterLeading), opener)
             }
-            None => match owner_frame(node, opener, continued) {
+            None => match (!after_chain)
+                .then(|| owner_frame(node, opener, continued))
+                .flatten()
+            {
                 Some(frame) => (frame, opener),
                 None => {
                     let (owner, from) = opener_frame(node, opener)?;
@@ -625,7 +669,11 @@ fn container<'t>(node: SyntaxNode<'t>, continued: &[TextSize]) -> Option<Contain
                     Frame::At(open.text_range().start(), close.text_range().end()),
                 )
             };
-            (owner_frame(node, *open, continued).unwrap_or(own), *open)
+            let after_chain = after_chains.binary_search(&open.text_range().start()).is_ok();
+            let owner = (!after_chain)
+                .then(|| owner_frame(node, *open, continued))
+                .flatten();
+            (owner.unwrap_or(own), *open)
         }
     };
     Some(Container {
@@ -770,7 +818,10 @@ fn continued_lines(firsts: &[TextSize], relaid: &Relaid) -> Vec<TextSize> {
             depth += edges[next].1;
             next += 1;
         }
-        if depth > 0 || relaid.joined.binary_search(&first).is_ok() {
+        if depth > 0
+            || relaid.joined.binary_search(&first).is_ok()
+            || relaid.continued.binary_search(&first).is_ok()
+        {
             continued.push(first);
         }
     }
