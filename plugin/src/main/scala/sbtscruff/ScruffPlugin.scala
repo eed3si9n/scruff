@@ -5,6 +5,7 @@ import sbt.Keys.*
 import sbt.internal.util.{ MessageOnlyException, Terminal }
 import scala.sys.process.{ Process, ProcessLogger }
 
+
 /** Formats and lints the whole build with the scruff command-line tool. */
 object ScruffPlugin extends AutoPlugin {
   override def trigger = allRequirements
@@ -12,26 +13,29 @@ object ScruffPlugin extends AutoPlugin {
   object autoImport {
     @transient
     val scruffFmt = taskKey[Unit]("Formats the Scala files in the build with scruff")
+
     @transient
-    val scruffFmtCheck = taskKey[Unit](
-      "Fails if scruffFmt would change a file, showing how; writes nothing"
-    )
+    val scruffFmtCheck =
+      taskKey[Unit]("Fails if scruffFmt would change a file, showing how; writes nothing")
+
     val scruff = inputKey[Unit](
       "Runs scruff in the build's root with the given arguments, such as `scruff check`"
     )
-    val scruffFmtOnCompile = settingKey[Boolean](
-      "Whether compiling formats the configuration's sources with scruff first"
-    )
+
+    val scruffFmtOnCompile =
+      settingKey[Boolean]("Whether compiling formats the configuration's sources with scruff first")
+
     val scruffCheckOnCompile = settingKey[Boolean](
       "Whether compiling checks the configuration's sources against scruff's lint rules first, fixing what they can"
     )
+
     val scruffVersion = settingKey[String](
       "The scruff release scruffBinary downloads; by default the version in .scruff.toml"
     )
+
     @transient
-    val scruffBinary = taskKey[File](
-      "The scruff executable to run; scruffVersion's release by default"
-    )
+    val scruffBinary =
+      taskKey[File]("The scruff executable to run; scruffVersion's release by default")
   }
 
   /** Formats the configuration's sources, for `compile`, when one has
@@ -45,9 +49,8 @@ object ScruffPlugin extends AutoPlugin {
    *  changed since they last passed.
    */
   @transient
-  private val scruffCheckSources = taskKey[Unit](
-    "Checks the configuration's sources against scruff's lint rules"
-  )
+  private val scruffCheckSources =
+    taskKey[Unit]("Checks the configuration's sources against scruff's lint rules")
 
   import autoImport.*
 

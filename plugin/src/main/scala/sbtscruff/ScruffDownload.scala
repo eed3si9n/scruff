@@ -13,6 +13,7 @@ import scala.concurrent.duration.*
 import scala.sys.process.Process
 import scala.util.control.NonFatal
 
+
 /** Downloads scruff's release binaries from GitHub, checks them against the
  *  release's `SHA256SUMS`, and keeps them in a cache shared by every build.
  */

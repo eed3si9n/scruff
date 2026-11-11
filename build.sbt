@@ -81,9 +81,9 @@ ThisBuild / version := {
 /** The scruff release the plugin downloads by default: this version, or
  *  for a snapshot, the tag it's based on, since a snapshot isn't released.
  */
-lazy val scruffDefaultVersion = settingKey[scala.util.Try[String]](
-  "The scruff version the plugin defaults to"
-)
+lazy val scruffDefaultVersion =
+  settingKey[scala.util.Try[String]]("The scruff version the plugin defaults to")
+
 ThisBuild / scruffDefaultVersion := {
   val v = version.value
   val snapshot = isSnapshot.value
