@@ -149,6 +149,24 @@ object A {
   }
 }
 
+<<< Scala 2: a block on the line after a call is its second argument list
+dialect = scala213
+===
+object A {
+  implicit val personIso: IsoLList.Aux[Person, String :*: Option[Int] :*: LNil] = LList.isoCurried(
+    { (p: Person) => ("name", p.name) :*: ("value", p.value) :*: LNil })
+    { in => Person(
+      in.find[String]("name").get,
+      in.find[Option[Int]]("value").flatten) }
+}
+>>>
+object A {
+  implicit val personIso: IsoLList.Aux[Person, String :*: Option[Int] :*: LNil] = LList.isoCurried(
+    { (p: Person) => ("name", p.name) :*: ("value", p.value) :*: LNil }
+  )
+    { in => Person(in.find[String]("name").get, in.find[Option[Int]]("value").flatten) }
+}
+
 <<< a build.sbt
 lazy val root = (project in file("."))
   .aggregate(core, cli)
