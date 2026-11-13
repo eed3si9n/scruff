@@ -58,6 +58,33 @@ x match
   case Seq(a, xs*) => 1
   case Seq(_*)     => 2
 
+<<< vararg splices of an infix expression
+f(a ++ b: _*)
+g(files map { f =>
+  f -> h(f)}: _*)
+>>>
+f(a ++ b*)
+g(files map { f =>
+  f -> h(f) }*)
+
+<<< Scala 2 with -Xsource:3 splices an infix expression in parentheses
+dialect = scala212source3
+===
+f(xs: _*)
+f(a ++ b: _*)
+f(!n: _*)
+f(a ++ b_ : _*)
+val importables0 = ListMap[From, Importable](files map { f =>
+  f -> toImportable(ev.toURI(f), ev.toRawSchema(f))}: _*)
+>>>
+f(xs*)
+f((a ++ b)*)
+f(!n*)
+f((a ++ b_)*)
+
+val importables0 = ListMap[From, Importable]((files map { f =>
+  f -> toImportable(ev.toURI(f), ev.toRawSchema(f)) })*)
+
 <<< plain Scala 2.13 gets its vararg splices back
 dialect = scala213
 ===

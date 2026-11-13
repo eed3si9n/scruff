@@ -3347,7 +3347,7 @@ mod tests {
                                     *n,
                                 ))
                             || matches!(n.kind(), SyntaxKind::Vararg | SyntaxKind::RepeatPattern)
-                                && rewrite::splice(&out, *n, new).is_some()
+                                && rewrite::splice(&out, *n, dialect).is_some()
                             || matches!(
                                 n.kind(),
                                 SyntaxKind::IfExpression
