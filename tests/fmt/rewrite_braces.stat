@@ -191,6 +191,37 @@ new A {
   val x = 1
 }
 
+<<< braces stay around lines at widths Scala 3's indentation rejects
+object A {
+  def a = 1
+
+  /** Doc */
+   def b = 2
+}
+def f = {
+  val x = if c then
+      a
+      b
+    else d
+  x
+}
+>>>
+object A {
+  def a = 1
+
+  /** Doc */
+   def b = 2
+}
+
+def f = {
+  val x =
+    if c then
+        a
+        b
+      else d
+  x
+}
+
 <<< Scala 2 keeps its braces
 dialect = scala213source3
 ===

@@ -79,6 +79,18 @@ object A:
       e()
 end A
 
+<<< a try inside a try's body keeps its line, as it would take the catch
+def f =
+  try
+    try { a } catch { case _: E => b }
+  catch
+    case _: F => c
+>>>
+def f =
+  try
+    try { a } catch { case _: E => b }
+  catch case _: F => c
+
 <<< try with catch and finally
 object A:
   def short = try

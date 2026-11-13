@@ -704,7 +704,8 @@ impl<'t> Formatter<'t> {
     /// on the keyword's line if it fits, as `if c then a`, `else b`,
     /// `try a`, `catch case e => b` and `finally c`, or else where it would
     /// be anyway. Not with comments around it, a body over several lines,
-    /// or one with an `if` inside, which could take an `else` after it; nor
+    /// or one with an `if` or `try` inside, which could take an `else`,
+    /// `catch` or `finally` after it; nor
     /// after an `if` condition over several lines, or inside parentheses.
     fn joinable_body(&self, node: SyntaxNode<'t>) -> Option<TextSize> {
         let owner = node.parent()?;
@@ -761,10 +762,15 @@ impl<'t> Formatter<'t> {
                     | SyntaxKind::TupleExpression
             )
         });
-        // An `if` inside could take an `else` after it.
+        // An `if` inside could take an `else` after it, and a `try` a
+        // `catch` or `finally`: `try try a catch b` and then `catch c`.
         let has_if = only.as_node().is_some_and(|n| {
-            n.descendants()
-                .any(|d| d.kind() == SyntaxKind::IfExpression)
+            n.descendants().any(|d| {
+                matches!(
+                    d.kind(),
+                    SyntaxKind::IfExpression | SyntaxKind::TryExpression
+                )
+            })
         });
         // A `case` with nothing after its arrow would take what follows,
         // and tree-sitter-scala misreads one that has a `;`.
