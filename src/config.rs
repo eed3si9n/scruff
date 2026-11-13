@@ -82,6 +82,10 @@ pub struct Dialect {
     pub question_mark_type_wildcard: bool,
     /// `f(xs*)` for `f(xs: _*)`, and `case Seq(xs*)` for `case Seq(xs @ _*)`.
     pub postfix_star_vararg_splices: bool,
+    /// `f(a ++ b*)` splicing the whole infix expression, `a ++ b`. Only
+    /// Scala 3's: Scala 2 with `-Xsource:3` reads it as `a ++ (b*)`, so
+    /// there `f(a ++ b: _*)` becomes `f((a ++ b)*)`.
+    pub infix_postfix_star_vararg_splices: bool,
     /// `if c then a` for `if (c) a`, `while c do x` for `while (c) x`, and
     /// `for x <- xs do f(x)` for `for (x <- xs) f(x)`. Only Scala 3's.
     pub quiet_syntax: bool,
@@ -124,6 +128,7 @@ impl Dialect {
         as_for_import_rename: true,
         question_mark_type_wildcard: true,
         postfix_star_vararg_splices: true,
+        infix_postfix_star_vararg_splices: true,
         quiet_syntax: true,
         significant_indentation: true,
         fewer_braces: true,
@@ -150,6 +155,7 @@ impl Dialect {
             as_for_import_rename: new_syntax,
             question_mark_type_wildcard: new_syntax,
             postfix_star_vararg_splices: new_syntax,
+            infix_postfix_star_vararg_splices: scala3,
             quiet_syntax: scala3,
             significant_indentation: scala3,
             fewer_braces: scala3,
@@ -923,6 +929,7 @@ mod tests {
             as_for_import_rename: true,
             question_mark_type_wildcard: true,
             postfix_star_vararg_splices: true,
+            infix_postfix_star_vararg_splices: true,
             quiet_syntax: true,
             significant_indentation: true,
             fewer_braces: true,
@@ -936,6 +943,7 @@ mod tests {
             as_for_import_rename: false,
             question_mark_type_wildcard: false,
             postfix_star_vararg_splices: false,
+            infix_postfix_star_vararg_splices: false,
             quiet_syntax: false,
             significant_indentation: false,
             fewer_braces: false,
@@ -945,6 +953,7 @@ mod tests {
             leading_infix_operators: false,
         };
         let source3 = Dialect {
+            infix_postfix_star_vararg_splices: false,
             quiet_syntax: false,
             significant_indentation: false,
             fewer_braces: false,

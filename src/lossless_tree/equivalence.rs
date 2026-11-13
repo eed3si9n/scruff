@@ -38,6 +38,8 @@
 //! chain mean nothing, as `(a && b)` as `a && b`: the tree holds the
 //! grouping, so a change of precedence is still a different shape. In
 //! Scala 2 they let a broken chain start its lines with the operators.
+//! Parentheses around a vararg's spliced expression mean nothing too:
+//! `f((a ++ b)*)` as `f(a ++ b: _*)`.
 //! Parentheses around a lambda's one typed parameter mean nothing:
 //! `{ (x: A) =>` as `{ x: A =>`, which a colon argument needs,
 //! `xs.map: (x: A) =>`.
@@ -215,6 +217,17 @@ fn is_chain_parens(node: &SyntaxNode<'_>) -> bool {
                 .and_then(|o| o.as_token().map(|t| matches!(t.text(), "&&" | "||")))
                 .unwrap_or(false)
     )
+}
+
+/// Parentheses around a vararg's spliced expression, as in `(a ++ b)*`,
+/// which mean nothing: Scala 3 reads `a ++ b*` the same, and Scala 2 needs
+/// them for `*` to splice more than `b`.
+fn is_splice_parens(node: &SyntaxNode<'_>) -> bool {
+    node.kind() == SyntaxKind::ParenthesizedExpression
+        && node.parent().is_some_and(|p| p.kind() == SyntaxKind::Vararg)
+        && node.first_child_or_token().is_some_and(|c| c.text() == "(")
+        && node.last_child_or_token().is_some_and(|c| c.text() == ")")
+        && node.children().count() == 1
 }
 
 /// The parentheses around a lambda's one parameter with a type and nothing
@@ -405,7 +418,9 @@ fn field(element: SyntaxElement<'_>) -> Option<&'static str> {
         },
         // Parentheses around a chain may be inside another node that's
         // skipped, as a block around one expression.
-        Some(parent) if is_chain_parens(&parent) => field(NodeOrToken::Node(parent)),
+        Some(parent) if is_chain_parens(&parent) || is_splice_parens(&parent) => {
+            field(NodeOrToken::Node(parent))
+        }
         // A lone typed parameter's parts are the lambda's parameters, as
         // they are without parentheses.
         Some(parent)
@@ -570,6 +585,7 @@ fn step(event: WalkEvent<SyntaxElement<'_>>) -> Option<Step<'_>> {
                 || is_nested_and_type(&node)
                 || is_pattern_type_parens(&node)
                 || is_chain_parens(&node)
+                || is_splice_parens(&node)
                 || is_lone_typed_binding(&node)
                 || node.kind() == SyntaxKind::Binding
                     && node.parent().is_some_and(|p| is_lone_typed_binding(&p))
@@ -595,7 +611,10 @@ fn may_come_or_go(token: &SyntaxToken<'_>) -> bool {
         || is_old_splice_token(token)
         || (matches!(token.text(), "(" | ")")
             && token.parent().is_some_and(|p| {
-                is_pattern_type_parens(&p) || is_chain_parens(&p) || is_lone_typed_binding(&p)
+                is_pattern_type_parens(&p)
+                    || is_chain_parens(&p)
+                    || is_splice_parens(&p)
+                    || is_lone_typed_binding(&p)
             }))
         || is_control_token(token)
         || is_optional_brace(token)

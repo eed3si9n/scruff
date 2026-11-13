@@ -8,7 +8,8 @@
 //! allows it. Not back: without it, `?` is a type's name.
 //!
 //! A vararg splice `f(xs: _*)` becomes `f(xs*)`, and `case Seq(xs @ _*)`
-//! becomes `case Seq(xs*)`, and back.
+//! becomes `case Seq(xs*)`, and back. Outside Scala 3, where `*` splices
+//! only a simple expression, `f(a ++ b: _*)` becomes `f((a ++ b)*)`.
 //!
 //! Scala 3's control syntax: `if (c) a` becomes `if c then a`,
 //! `while (c) x` becomes `while c do x`, and `for (x <- xs) f(x)` becomes
@@ -286,10 +287,12 @@ fn edits_for(
                 edits.extend(separators.into_iter().flatten());
             }
             SyntaxKind::Vararg | SyntaxKind::RepeatPattern => {
-                if let Some(edit) = splice(text, node, dialect.postfix_star_vararg_splices)
-                    .filter(|(range, _)| tree.verbatim_at(range.start()).is_none())
-                {
-                    edits.push(edit);
+                if let Some(splice) = splice(text, node, dialect).filter(|edits| {
+                    edits
+                        .iter()
+                        .all(|(range, _)| tree.verbatim_at(range.start()).is_none())
+                }) {
+                    edits.extend(splice);
                 }
             }
             SyntaxKind::IfExpression | SyntaxKind::WhileExpression | SyntaxKind::ForExpression => {
@@ -501,15 +504,18 @@ pub(crate) fn after_a_path(rename: SyntaxNode<'_>) -> bool {
         .is_some_and(|t| t.text() == ".")
 }
 
-/// The edit that writes a vararg splice, `node`, as `xs*` when `postfix`,
-/// or else as `xs: _*`, or in a pattern `xs @ _*`: the text between `xs`
-/// and `*` replaced. None if it's already written so, or if a comment is in
-/// the way. `_*` in a pattern is the same in both.
+/// The edits that write a vararg splice, `node`, as `xs*` where `dialect`
+/// allows it, or else as `xs: _*`, or in a pattern `xs @ _*`: the text
+/// between `xs` and `*` replaced. None if it's already written so, or if a
+/// comment is in the way. `_*` in a pattern is the same in both. Outside
+/// Scala 3, `*` splices only a simple expression, so `a ++ b: _*` becomes
+/// `(a ++ b)*`: without the parentheses, Scala 2 reads `a ++ (b*)`.
 pub(super) fn splice(
     text: &str,
     node: SyntaxNode<'_>,
-    postfix: bool,
-) -> Option<(TextRange, String)> {
+    dialect: Dialect,
+) -> Option<Vec<(TextRange, String)>> {
+    let postfix = dialect.postfix_star_vararg_splices;
     let mut children = node.non_trivia_children();
     let (first, star) = (children.next()?, node.last_child_or_token()?);
     if star.text() != "*" {
@@ -536,15 +542,32 @@ pub(super) fn splice(
     }
     let range = TextRange::new(spliced.text_range().end(), star.text_range().start());
     let between = &text[range];
+    let parens = postfix
+        && !dialect.infix_postfix_star_vararg_splices
+        && matches!(
+            spliced.kind(),
+            SyntaxKind::InfixExpression
+                | SyntaxKind::PostfixExpression
+                | SyntaxKind::AscriptionExpression
+                | SyntaxKind::AssignmentExpression
+                | SyntaxKind::LambdaExpression
+                | SyntaxKind::IfExpression
+                | SyntaxKind::MatchExpression
+                | SyntaxKind::TryExpression
+                | SyntaxKind::WhileExpression
+                | SyntaxKind::DoWhileExpression
+                | SyntaxKind::ForExpression
+                | SyntaxKind::ReturnExpression
+                | SyntaxKind::ThrowExpression
+        );
     let in_the_way = if postfix {
         // Only `: _` or `@ _` and spaces; and `xs*` mustn't make one name,
-        // as `foo_*` or `++*` would.
+        // as `foo_*` or `++*` would, unless `)` comes between.
         let last = spliced.text().chars().next_back()?;
         !between
             .chars()
             .all(|c| c.is_whitespace() || matches!(c, ':' | '@' | '_'))
-            || last == '_'
-            || is_operator_char(last)
+            || !parens && (last == '_' || is_operator_char(last))
     } else {
         !between.chars().all(char::is_whitespace)
     };
@@ -552,11 +575,17 @@ pub(super) fn splice(
         return None;
     }
     let replacement = match (postfix, node.kind()) {
+        (true, _) if parens => ")",
         (true, _) => "",
         (false, SyntaxKind::Vararg) => ": _",
         (false, _) => " @ _",
     };
-    Some((range, replacement.to_string()))
+    let mut edits = Vec::new();
+    if parens {
+        edits.push((TextRange::empty(spliced.text_range().start()), "(".to_string()));
+    }
+    edits.push((range, replacement.to_string()));
+    Some(edits)
 }
 
 /// The edits that write a control expression, `node`, in Scala 3's syntax
@@ -1456,6 +1485,7 @@ mod tests {
         as_for_import_rename: false,
         question_mark_type_wildcard: false,
         postfix_star_vararg_splices: false,
+        infix_postfix_star_vararg_splices: false,
         quiet_syntax: false,
         significant_indentation: false,
         fewer_braces: false,
