@@ -43,6 +43,10 @@
 //! Parentheses around a lambda's one typed parameter mean nothing:
 //! `{ (x: A) =>` as `{ x: A =>`, which a colon argument needs,
 //! `xs.map: (x: A) =>`.
+//! A symbolic name in backticks means the same as without them, as
+//! `` object `#::`: `` as `object #::`, which Scala 3 needs before a colon.
+//! And an empty parameter clause that is a class's only one means nothing,
+//! as `class A private ():` as `class A private`.
 
 use std::fmt;
 
@@ -315,6 +319,9 @@ fn new_token<'t>(token: &SyntaxToken<'t>) -> (Option<SyntaxKind>, &'t str) {
     if is_implicit_clause_keyword(token) {
         return (None, "using");
     }
+    if let Some(name) = symbolic_name(token) {
+        return (None, name);
+    }
     if is_and_type_operator(token) {
         return (None, "&");
     }
@@ -329,6 +336,42 @@ fn new_token<'t>(token: &SyntaxToken<'t>) -> (Option<SyntaxKind>, &'t str) {
         | (Some(SyntaxKind::AsRenamedIdentifier), "as") => (None, token.text()),
         (_, text) => (Some(token.kind()), text),
     }
+}
+
+/// A symbolic name without its backticks, `#::` for `` `#::` ``, which
+/// mean the same. Only for names of operator characters: in a pattern,
+/// `` `x` `` is a stable identifier and `x` a new variable.
+fn symbolic_name<'t>(token: &SyntaxToken<'t>) -> Option<&'t str> {
+    if !matches!(
+        token.kind(),
+        SyntaxKind::Identifier | SyntaxKind::OperatorIdentifier | SyntaxKind::TypeIdentifier
+    ) {
+        return None;
+    }
+    let text = token.text();
+    let name = text
+        .strip_prefix('`')
+        .and_then(|t| t.strip_suffix('`'))
+        .unwrap_or(text);
+    (!name.is_empty() && name.chars().all(|c| "!#%&*+-/:<=>?@\\^|~".contains(c))).then_some(name)
+}
+
+/// An empty parameter clause that is a class's only one, as in
+/// `class A private ()`, which means the same as none: `class A private`.
+fn is_empty_class_clause(node: &SyntaxNode<'_>) -> bool {
+    let mut children = node.non_trivia_children();
+    node.kind() == SyntaxKind::ClassParameters
+        && matches!(
+            (children.next(), children.next(), children.next()),
+            (Some(open), Some(close), None) if open.text() == "(" && close.text() == ")"
+        )
+        && node.parent().is_some_and(|class| {
+            class
+                .children()
+                .filter(|c| c.kind() == SyntaxKind::ClassParameters)
+                .count()
+                == 1
+        })
 }
 
 /// Whether `token` is the `implicit` or `using` that starts a parameter
@@ -600,6 +643,7 @@ fn step(event: WalkEvent<SyntaxElement<'_>>) -> Option<Step<'_>> {
                 || is_chain_parens(&node)
                 || is_splice_parens(&node)
                 || is_lone_typed_binding(&node)
+                || is_empty_class_clause(&node)
                 || node.kind() == SyntaxKind::Binding
                     && node.parent().is_some_and(|p| is_lone_typed_binding(&p))
                 || is_optional_end_marker(&node) =>
@@ -628,6 +672,7 @@ fn may_come_or_go(token: &SyntaxToken<'_>) -> bool {
                     || is_chain_parens(&p)
                     || is_splice_parens(&p)
                     || is_lone_typed_binding(&p)
+                    || is_empty_class_clause(&p)
             }))
         || is_control_token(token)
         || is_optional_brace(token)
@@ -1234,6 +1279,32 @@ mod tests {
         );
         // Statements that move out of the block don't.
         differs("def f = {\n  a\n  b\n}\n", "def f =\n  a\nb\n");
+    }
+
+    #[test]
+    fn backticks_around_a_symbolic_name_mean_nothing() {
+        for (old, new) in [
+            ("object #:: {\n  val x = 1\n}\n", "object `#::`:\n  val x = 1\n"),
+            ("val y = a #:: b\n", "val y = a `#::` b\n"),
+        ] {
+            assert_eq!(check_equivalent(old, new), Ok(()), "{old}");
+            assert_eq!(check_equivalent(new, old), Ok(()), "{old}");
+        }
+        // In a pattern, `x` is a new variable and `` `x` `` a stable one.
+        differs("x match { case y => 1 }\n", "x match { case `y` => 1 }\n");
+        differs("object #:: {}\n", "object `#:::` {}\n");
+    }
+
+    #[test]
+    fn an_empty_only_class_clause_means_nothing() {
+        let old = "class A private {\n  val x = 1\n}\n";
+        let new = "class A private ():\n  val x = 1\n";
+        assert_eq!(check_equivalent(old, new), Ok(()));
+        assert_eq!(check_equivalent(new, old), Ok(()));
+        assert_eq!(check_equivalent("class A\n", "class A()\n"), Ok(()));
+        // Not before another clause: `class A()(implicit x: X)` takes `()`.
+        differs("class A()(implicit x: X)\n", "class A(implicit x: X)\n");
+        differs("class A(x: X)\n", "class A()\n");
     }
 
     #[test]

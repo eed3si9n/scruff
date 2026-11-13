@@ -756,7 +756,10 @@ pub(super) fn control(
 /// The edits that take a construct's braces out for Scala 3's indentation:
 /// `def f = {` to `def f =`, `x match {` to `x match`, `class A {` to
 /// `class A:`, and `for {` ... `} yield` to `for` ... `yield`, with the `}`
-/// line gone, or the `}` before `else`, `catch`, `finally` or `yield`.
+/// line gone, or the `}` before `else`, `catch`, `finally` or `yield`. A
+/// symbolic name before the `:` gets backticks, `` object `#::`: ``, and a
+/// constructor's `private` or `protected` an empty clause,
+/// `class A private ():`, as Scala 3 deprecates a `:` right after either.
 /// None where the layout leaves any doubt: unless `{` ends its line, `}`
 /// starts its own, every line between is deeper than the `}` and the line
 /// the construct starts on, and the next line isn't deeper than the `}`.
@@ -862,16 +865,28 @@ pub(super) fn braces(tree: &Tree, node: SyntaxNode<'_>) -> Option<Vec<(TextRange
         }
     }
     let mut edits = Vec::new();
+    let template = matches!(kind, SyntaxKind::TemplateBody | SyntaxKind::EnumBody);
+    let symbolic = before.text().chars().all(is_operator_char);
     let opening = match kind {
-        // `object #:: :`, since `#:::` would be one name.
-        SyntaxKind::TemplateBody | SyntaxKind::EnumBody
-            if before
-                .text()
-                .chars()
-                .next_back()
-                .is_some_and(is_operator_char) =>
+        // `object #:::` would be one name, and Scala 3 deprecates
+        // `object #:: :`, so the name gets backticks: `` object `#::`: ``.
+        _ if template && symbolic => {
+            edits.push((before.text_range(), format!("`{}`", before.text())));
+            ":"
+        }
+        // `foo_+` ends in an operator too, but `foo_+:` is one name.
+        _ if template && before.text().chars().next_back().is_some_and(is_operator_char) => {
+            return None;
+        }
+        // Scala 3 warns about `class A private:` as it does about
+        // `object #:: :`, so it gets an empty clause: `class A private ():`.
+        _ if template
+            && matches!(before.text(), "private" | "protected")
+            && before
+                .parent()
+                .is_some_and(|p| p.kind() == SyntaxKind::AccessModifier) =>
         {
-            " :"
+            " ():"
         }
         SyntaxKind::TemplateBody | SyntaxKind::EnumBody => ":",
         _ => "",
@@ -1914,7 +1929,19 @@ mod tests {
             ),
             (
                 "object #:: {\n  val x = 1\n}\n",
-                "object #:: :\n  val x = 1\n",
+                "object `#::`:\n  val x = 1\n",
+            ),
+            (
+                "class A private {\n  val x = 1\n}\n",
+                "class A private ():\n  val x = 1\n",
+            ),
+            (
+                "class A protected {\n  val x = 1\n}\n",
+                "class A protected ():\n  val x = 1\n",
+            ),
+            (
+                "class A private[p] {\n  val x = 1\n}\n",
+                "class A private[p]:\n  val x = 1\n",
             ),
             // A comment after `{` stays on its line.
             ("def f = { // c\n  a\n}\n", "def f = // c\n  a\n"),
@@ -1933,6 +1960,8 @@ mod tests {
     #[test]
     fn braces_left_as_written() {
         for source in [
+            // `foo_+:` would be one name.
+            "object foo_+ {\n  val x = 1\n}\n",
             // On one line.
             "def f = { a }\n",
             // Something after `}`.
