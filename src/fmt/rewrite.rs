@@ -19,9 +19,12 @@
 //! An `implicit` parameter clause becomes a `using` one: `def f(implicit
 //! ec: EC)` becomes `def f(using ec: EC)`, where the dialect allows it. Not
 //! where a class parameter is a `val` or `var` or has modifiers: there,
-//! `using` would make it a `given`, which `import a.*` doesn't import. And
-//! not back: `using EC`, without a name, has no Scala 2 form. Callers that
-//! pass the argument explicitly must then write `f(using ec)`.
+//! `using` would make it a `given`, which `import a.*` doesn't import. Not
+//! in a class's first clause either: `class C(implicit ec: EC)` gets an
+//! empty clause before it, which callers pass as `new C()(ec)`, and
+//! `class C(using ec: EC)` doesn't. And not back: `using EC`, without a
+//! name, has no Scala 2 form. Callers that pass the argument explicitly
+//! must then write `f(using ec)`.
 //!
 //! A compound type becomes an intersection one: `A with B` becomes `A & B`,
 //! where the dialect allows it. Not back: in Scala 2, `&` is a type's name.
@@ -1560,6 +1563,9 @@ mod tests {
             "def f(using /* c */ ec: EC) = 1\n"
         );
         for source in [
+            // `new C()(ec)` needs the empty clause `implicit` adds.
+            "class C(implicit ec: EC)\n",
+            "class C[A](implicit ec: EC) extends B\n",
             "class C(implicit val ec: EC)\n",
             "class C(implicit var ec: EC)\n",
             "class C(implicit private val ec: EC)\n",

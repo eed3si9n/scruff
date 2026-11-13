@@ -29,6 +29,15 @@ class C(implicit val ec: ExecutionContext)
 
 class D(implicit private val ec: ExecutionContext)
 
+<<< a class's first clause stays implicit, as `new C()(ec)` needs
+class C(implicit ec: ExecutionContext)
+class D[A](implicit ord: Ordering[A]) extends B
+>>>
+class C(implicit ec: ExecutionContext)
+
+
+class D[A](implicit ord: Ordering[A]) extends B
+
 <<< broken over lines
 def f(
     x: Int
