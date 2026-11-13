@@ -352,3 +352,27 @@ def foo: Int = 1
 object A:
   object B:
     def foo: Int = 1
+
+<<< lines after `then` or `do` at a case body's width stay out of the branch
+object P:
+  def f(t: Any, c: Boolean): Int = t match
+    case _: String =>
+      if c then
+      println("then")
+      1
+    case _ =>
+      while c do
+      println("do")
+      2
+>>>
+object P:
+  def f(t: Any, c: Boolean): Int =
+    t match
+      case _: String =>
+        if c then
+        println("then")
+        1
+      case _ =>
+        while c do
+        println("do")
+        2
