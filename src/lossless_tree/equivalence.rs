@@ -334,7 +334,9 @@ fn new_token<'t>(token: &SyntaxToken<'t>) -> (Option<SyntaxKind>, &'t str) {
 /// Whether `token` is the `implicit` or `using` that starts a parameter
 /// clause, where one means the same as the other: not where a class
 /// parameter is a `val` or `var` or has modifiers, since a `using` one is a
-/// `given` member, which `import a.*` leaves out.
+/// `given` member, which `import a.*` leaves out. And not in a class's
+/// first clause: `class C(implicit ec: EC)` gets an empty clause before it,
+/// so callers write `new C()(ec)`, but `class C(using ec: EC)` doesn't.
 pub(crate) fn is_implicit_clause_keyword(token: &SyntaxToken<'_>) -> bool {
     if !matches!(token.text(), "implicit" | "using") {
         return false;
@@ -342,8 +344,19 @@ pub(crate) fn is_implicit_clause_keyword(token: &SyntaxToken<'_>) -> bool {
     let Some(clause) = token.parent() else {
         return false;
     };
+    let first_class_clause = || {
+        clause
+            .parent()
+            .and_then(|class| {
+                class
+                    .children()
+                    .find(|c| c.kind() == SyntaxKind::ClassParameters)
+            })
+            .is_some_and(|first| first.text_range() == clause.text_range())
+    };
     match clause.kind() {
         SyntaxKind::Parameters => true,
+        SyntaxKind::ClassParameters if first_class_clause() => false,
         SyntaxKind::ClassParameters => !clause.children().any(|parameter| {
             parameter.children_with_tokens().any(|part| match part {
                 NodeOrToken::Node(node) => node.kind() == SyntaxKind::Modifiers,
@@ -1098,10 +1111,12 @@ mod tests {
 
     #[test]
     fn using_clauses_mean_implicit_ones() {
-        let old = "def f(x: A)(implicit /* c */ ec: EC, b: B) = 1\nclass C(implicit d: D)\n";
-        let new = "def f(x: A)(using /* c */ ec: EC, b: B) = 1\nclass C(using d: D)\n";
+        let old = "def f(x: A)(implicit /* c */ ec: EC, b: B) = 1\nclass C(x: A)(implicit d: D)\n";
+        let new = "def f(x: A)(using /* c */ ec: EC, b: B) = 1\nclass C(x: A)(using d: D)\n";
         assert_eq!(check_equivalent(old, new), Ok(()));
         assert_eq!(check_equivalent(new, old), Ok(()));
+        // A class's first `implicit` clause has an empty one before it.
+        differs("class C(implicit d: D)\n", "class C(using d: D)\n");
         // A `using` class parameter that is a member is a `given` one.
         differs("class C(implicit val d: D)\n", "class C(using val d: D)\n");
         differs(
