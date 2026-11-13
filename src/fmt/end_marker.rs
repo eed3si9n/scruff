@@ -230,7 +230,12 @@ fn own_region_name<'t>(node: SyntaxNode<'t>) -> Option<Cow<'t, str>> {
             (owns || unbraced_enumerators).then_some(Cow::Borrowed("for"))
         }
         SyntaxKind::MatchExpression => {
-            (field("body")?.kind() == SyntaxKind::IndentedCases).then_some(Cow::Borrowed("match"))
+            // tree-sitter-scala reads `x = y match` as `(x = y) match`;
+            // Scala reads it as `x = (y match)`, an assignment, which
+            // takes no marker.
+            let assigned = field("value")?.kind() == SyntaxKind::AssignmentExpression;
+            (!assigned && field("body")?.kind() == SyntaxKind::IndentedCases)
+                .then_some(Cow::Borrowed("match"))
         }
         SyntaxKind::TryExpression => {
             let body = field("body").is_some_and(|b| !is_braced(&b));
