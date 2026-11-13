@@ -52,7 +52,7 @@
 
 use crate::config::Dialect;
 use crate::lossless_tree::{
-    NodeOrToken, SyntaxKind, SyntaxNode, SyntaxToken, TextRange, TextSize, Tree,
+    NodeOrToken, SyntaxElement, SyntaxKind, SyntaxNode, SyntaxToken, TextRange, TextSize, Tree,
     check_equivalent_trees, is_extends_separator, is_implicit_clause_keyword,
     is_type_wildcard_place, parse,
 };
@@ -762,7 +762,9 @@ pub(super) fn control(
 /// `class A private ():`, as Scala 3 deprecates a `:` right after either.
 /// None where the layout leaves any doubt: unless `{` ends its line, `}`
 /// starts its own, every line between is deeper than the `}` and the line
-/// the construct starts on, and the next line isn't deeper than the `}`.
+/// the construct starts on, the statements start at one width and the lines
+/// keep to Scala 3's indentation rules (see [`lines_aligned`]), and the
+/// next line isn't deeper than the `}`.
 pub(super) fn braces(tree: &Tree, node: SyntaxNode<'_>) -> Option<Vec<(TextRange, String)>> {
     let text = tree.syntax().text();
     let kind = node.kind();
@@ -847,7 +849,9 @@ pub(super) fn braces(tree: &Tree, node: SyntaxNode<'_>) -> Option<Vec<(TextRange
         at(open.text_range().end()),
         line_start(close.text_range().start()),
         floor,
-    ) {
+    ) || !lines_aligned(tree, open, close)
+        || (kind != SyntaxKind::ForExpression && !statements_share_width(node.non_trivia_children()))
+    {
         return None;
     }
     // Without braces, a `case` clause's body must be deeper than its `case`.
@@ -942,9 +946,11 @@ pub(super) fn braces(tree: &Tree, node: SyntaxNode<'_>) -> Option<Vec<(TextRange
 ///
 /// Over several lines, `{` or the lambda's `=>` ends its line, every line
 /// between is deeper than the `}`, the `{` line and the call's first line,
-/// and the `}` starts its line and goes, with its line if nothing follows
-/// it, when the next line isn't deeper. On one line, with one expression or
-/// `case` and no comments, the body goes on the next line, a step deeper
+/// the statements start at one width and the lines keep to Scala 3's
+/// indentation rules (see [`lines_aligned`]), and the `}` starts its line
+/// and goes, with its line if nothing follows it, when the next line isn't
+/// deeper. On one line, with one expression or `case` and no comments, the
+/// body goes on the next line, a step deeper
 /// than the line the call's argument lists start on, and a `.` after the
 /// `}` on a line of its own at that line's width.
 pub(super) fn fewer_braces(tree: &Tree, call: SyntaxNode<'_>) -> Option<Vec<Edit>> {
@@ -1112,12 +1118,22 @@ pub(super) fn fewer_braces(tree: &Tree, call: SyntaxNode<'_>) -> Option<Vec<Edit
     let floor = indent(close.text_range().start())
         .max(indent(open.text_range().start()))
         .max(indent(call_first.text_range().start()));
+    // A lambda's statements are in its body.
+    let body = match statements.as_slice() {
+        [NodeOrToken::Node(lambda)] if lambda.kind() == SyntaxKind::LambdaExpression => lambda
+            .child_by_field_name("body")
+            .and_then(NodeOrToken::into_node)
+            .filter(|b| matches!(b.kind(), SyntaxKind::Block | SyntaxKind::IndentedBlock)),
+        _ => Some(argument),
+    };
     if !lines_deeper(
         tree,
         at(line_end.text_range().end()),
         line_start(close.text_range().start()),
         floor,
-    ) {
+    ) || !lines_aligned(tree, line_end, close)
+        || body.is_some_and(|b| !statements_share_width(b.non_trivia_children()))
+    {
         return None;
     }
     if argument.kind() == SyntaxKind::CaseBlock {
@@ -1243,6 +1259,88 @@ fn lines_deeper(tree: &Tree, start: usize, end: usize, width: usize) -> bool {
                 || content.starts_with(['}', ')', ']'])
                 || (!content.starts_with('\t') && line.len() - content.len() > width)
         })
+}
+
+/// Whether the lines from the one after `open` to the one `close` starts
+/// keep to Scala 3's indentation rules without braces around them: a line
+/// less deep than the one before it goes back to the width of a region
+/// that is open, not between two. A region opens on the line after one
+/// that ends in `=`, `=>`, `then`, `match` and the like; a deeper line
+/// after any other is a continuation, which opens none. In braces, scalac
+/// lets `else` sit between its `if` line and the `then` branch, and a
+/// statement between two widths; without them, it doesn't. Closing
+/// brackets' lines are skipped, and so are lines in a string; a tab in the
+/// indentation fails.
+fn lines_aligned(tree: &Tree, open: SyntaxToken<'_>, close: SyntaxToken<'_>) -> bool {
+    // Scala 3's list, with `{`, a template's `:` and a given's `with`, and
+    // the `)` that ends an old-style `if` or `while` condition or `for`
+    // enumerators: `if (c)` and the body indented below.
+    let opens_region = |token: SyntaxToken<'_>| {
+        matches!(
+            token.text(),
+            "{" | "=" | "=>" | "?=>" | "<-" | ":" | "with" | "if" | "then" | "else" | "while"
+                | "do" | "for" | "yield" | "match" | "try" | "catch" | "finally" | "return"
+                | "throw"
+        ) || token.text() == ")"
+            && token.parent().is_some_and(|p| {
+                p.kind() == SyntaxKind::ForExpression
+                    || p.field_name() == Some("condition")
+                        && p.parent().is_some_and(|q| {
+                            matches!(
+                                q.kind(),
+                                SyntaxKind::IfExpression | SyntaxKind::WhileExpression
+                            )
+                        })
+            })
+    };
+    let mut widths: Vec<usize> = Vec::new();
+    let mut previous = open;
+    let mut token = next_code(open);
+    while let Some(t) = token.filter(|t| *t != close) {
+        let start = t.text_range().start();
+        let in_string = tree.verbatim_at(start).is_some_and(|v| v.range.start() < start);
+        if t.is_first_on_line() && !in_string && !matches!(t.text(), "}" | ")" | "]") {
+            let indentation = t.indentation();
+            if indentation.contains('\t') {
+                return false;
+            }
+            let width = indentation.len();
+            if widths.last().is_none_or(|&w| w < width) {
+                if widths.is_empty() || opens_region(previous) {
+                    widths.push(width);
+                }
+            } else {
+                while widths.last().is_some_and(|&w| w > width) {
+                    widths.pop();
+                }
+                if widths.last() != Some(&width) {
+                    return false;
+                }
+            }
+        }
+        previous = t;
+        token = next_code(t);
+    }
+    true
+}
+
+/// Whether the statements among `elements` (its named nodes) that start a
+/// line all start at one width. In braces scruff keeps a statement deeper
+/// than the one before it where it is; without them, scalac would read it
+/// as that statement's continuation.
+fn statements_share_width<'t>(elements: impl Iterator<Item = SyntaxElement<'t>>) -> bool {
+    let mut widths = elements
+        .filter(|e| e.kind().is_named())
+        .filter_map(|e| match e {
+            NodeOrToken::Node(node) => node.tokens().find(SyntaxToken::owns_trivia),
+            NodeOrToken::Token(token) => Some(token),
+        })
+        .filter(SyntaxToken::is_first_on_line)
+        .map(|t| t.indentation());
+    match widths.next() {
+        Some(first) => widths.all(|w| w == first),
+        None => true,
+    }
 }
 
 /// The edits that put braces around an indented construct, `node`, for a
@@ -1975,6 +2073,12 @@ mod tests {
             "def f = {\na\n}\n",
             // A deeper line after the `}`.
             "  def f = {\n    a\n  }\n    b\n",
+            // Statements at two widths: without braces, the deeper one would
+            // continue the one before it, or sit between two widths.
+            "object A {\n  def a = 1\n     def b = 2\n}\n",
+            "object A {\n  def a =\n    1\n\n   def b = 2\n}\n",
+            // An `else` between its `if` line and the `then` branch.
+            "def f = {\n  val x = if c then\n      a\n    else b\n  x\n}\n",
             // Empty.
             "class A {\n}\n",
             // A `for` without `yield` after its enumerators.
