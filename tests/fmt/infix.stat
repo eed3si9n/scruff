@@ -306,3 +306,18 @@ val isNull =
 val isNull =
   (alpha.isInstanceOf[String]
     && b.asInstanceOf[String].size == 0)
+
+<<< a soft modifier as the left operand at the start of a statement
+object A:
+  val opaque = 42
+  val y =
+    opaque max 42
+  def f = { open max 1 }
+>>>
+object A:
+  val opaque = 42
+
+  val y =
+    opaque max 42
+
+  def f = { open max 1 }
