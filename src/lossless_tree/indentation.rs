@@ -362,16 +362,8 @@ mod tests {
 
     #[test]
     fn misparsed_continuation_lines_are_flagged() {
-        // Scala reads `f(a)` and `return if c then 1 else 2`; tree-sitter-scala
-        // 0.26.4 starts a statement on each deeper line.
-        let call = problems("object O:\n  def g =\n    f\n      (a)\n");
-        assert_eq!(
-            call[1],
-            (
-                SyntaxKind::IndentedBlock,
-                Some(RegionProblem::MixedIndentation)
-            )
-        );
+        // Scala reads `return if c then 1 else 2`; tree-sitter-scala starts a
+        // statement on the deeper line.
         let ret = problems("object O:\n  def h: Int =\n    return\n      if c then 1 else 2\n");
         assert_eq!(
             ret[1],
@@ -390,6 +382,14 @@ mod tests {
         assert_eq!(trailing[1], (SyntaxKind::IndentedBlock, None));
         let leading = problems("object O:\n  def s =\n    a == 0\n    ||\n      b\n");
         assert_eq!(leading[1], (SyntaxKind::IndentedBlock, None));
+    }
+
+    #[test]
+    fn argument_clauses_on_deeper_lines_are_read_whole() {
+        // tree-sitter-scala 0.26.13 started a statement at `(a)`; 0.26.14
+        // reads `f(a)`, as Scala does.
+        let call = problems("object O:\n  def g =\n    f\n      (a)\n");
+        assert_eq!(call[1], (SyntaxKind::IndentedBlock, None));
     }
 
     #[test]
